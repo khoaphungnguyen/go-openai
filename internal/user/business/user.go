@@ -1,4 +1,4 @@
-package businessuser
+package userbusiness
 
 import storageuser "github.com/khoaphungnguyen/go-openai/internal/user/storage"
 

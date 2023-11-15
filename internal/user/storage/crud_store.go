@@ -1,4 +1,4 @@
-package storageuser
+package userstorage
 
 import (
 	"errors"
@@ -9,17 +9,23 @@ import (
 	"gorm.io/gorm"
 )
 
-// Create adds a new user to the database with a hashed password
+// Create adds a new user to the database
 func (store *userStore) Create(user *modeluser.User) error {
-	// No need to hash here, as it should be done already in the business layer
-	return store.db.Create(user).Error
+	// Omit the password field when saving to the database
+	return store.db.Omit("password").Create(user).Error
 }
 
-// GetByEmail finds a user by email
+// GetUserByEmail finds a user by email
 func (store *userStore) GetUserByEmail(email string) (*modeluser.User, error) {
 	var user modeluser.User
 	err := store.db.Where("email = ?", email).First(&user).Error
-	return &user, err
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
 }
 
 // Update modifies an existing user in the database
@@ -28,51 +34,50 @@ func (store *userStore) Update(user *modeluser.User) error {
 }
 
 // Delete removes a user from the database by UUID
-func (store *userStore) Delete(email string) error {
-	return store.db.Delete(&modeluser.User{}, email).Error
+func (store *userStore) Delete(id uuid.UUID) error {
+	return store.db.Delete(&modeluser.User{}, id).Error
 }
 
-// GetByUUID finds a user by UUID
+// GetUserByUUID finds a user by UUID
 func (store *userStore) GetUserByUUID(id uuid.UUID) (*modeluser.User, error) {
 	var user modeluser.User
 	err := store.db.Where("id = ?", id).First(&user).Error
-	return &user, err
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
 }
 
 // EmailVerified checks if the user's email has been verified
 func (store *userStore) EmailVerified(email string) (bool, error) {
 	var user modeluser.User
-	if err := store.db.Select("email_verified").First(&user, email).Error; err != nil {
+	err := store.db.Select("email_verified").Where("email = ?", email).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, errors.New("user not found")
+		}
 		return false, err
 	}
 	return user.EmailVerified, nil
 }
 
-// CheckLastLogin checks when the user last logged in and potentially performs some actions if necessary
-func (store *userStore) CheckLastLogin(email string) (bool, error) {
+// CheckLastLogin checks when the user last logged in
+func (store *userStore) CheckLastLogin(id uuid.UUID) (bool, error) {
 	var user modeluser.User
-	if err := store.db.First(&user, "email = ?", email).Error; err != nil {
-		// Handle not found error separately if necessary
-		if err == gorm.ErrRecordNotFound {
-			return false, nil // or return a custom error indicating user not found
+	err := store.db.Where("id = ?", id).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, errors.New("user not found")
 		}
 		return false, err
 	}
 
-	// Define the duration after which a token should be refreshed (e.g., 30 days)
 	tokenRefreshDuration := 30 * 24 * time.Hour
-
-	// If LastLogin is nil, it means the user never logged in, handle this case as needed
-	if user.LastLogin == nil {
-		return false, errors.New("user never logged in") // or another appropriate action
+	if user.LastLogin == nil || time.Since(*user.LastLogin) > tokenRefreshDuration {
+		return false, nil // Token should be refreshed or user never logged in
 	}
-
-	// Check if the last login is within the token refresh duration
-	if time.Since(*user.LastLogin) <= tokenRefreshDuration {
-		// Last login is within the required duration, no need to refresh token
-		return true, nil
-	}
-
-	// Last login is older than the required duration, token should be refreshed
-	return false, nil
+	return true, nil // Last login is within the required duration
 }

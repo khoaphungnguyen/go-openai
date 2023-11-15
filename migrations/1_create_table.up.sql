@@ -1,10 +1,10 @@
 -- User Table
 CREATE TABLE "user" (
   id UUID PRIMARY KEY,
-  first_name VARCHAR(50) NOT NULL,
-  last_name VARCHAR(50) NOT NULL,
+  full_name VARCHAR(100) NOT NULL,  
   email VARCHAR(50) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,  
+  salt VARCHAR(255),                    
   role VARCHAR(10) DEFAULT 'user',
   email_verified BOOLEAN DEFAULT FALSE,
   last_login TIMESTAMPTZ,

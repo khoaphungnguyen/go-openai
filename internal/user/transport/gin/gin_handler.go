@@ -1,14 +1,16 @@
-package ginuser
+package usergin
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/khoaphungnguyen/go-openai/internal/user/auth"
+	userauth "github.com/khoaphungnguyen/go-openai/internal/user/auth"
 	modeluser "github.com/khoaphungnguyen/go-openai/internal/user/model"
+	"github.com/khoaphungnguyen/go-openai/internal/user/utils"
 )
 
 // LoginPayload login body
@@ -23,52 +25,41 @@ type LoginResponse struct {
 	RefreshToken string `json:"refreshtoken"`
 }
 
-// / Signup handles new user registration
-func (h *UserHanlder) Signup(c *gin.Context) {
+// Signup handles new user registration
+func (h *UserHandler) Signup(c *gin.Context) {
 	var user modeluser.User
 	if err := c.ShouldBindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
-
+	fmt.Println(&user)
 	if err := h.userService.CreateUser(&user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "User created successfully"})
+	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully"})
 }
 
-// Login is a function that handles user login
-func (h *UserHanlder) Login(c *gin.Context) {
+// Login handles user login
+func (h *UserHandler) Login(c *gin.Context) {
 	var payload LoginPayload
-	//var user usermodel.User
-	err := c.ShouldBindJSON(&payload)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"Error": "Invalid Inputs",
-		})
-		c.Abort()
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Inputs"})
 		return
 	}
+
 	user, err := h.userService.GetUserByEmail(payload.Email)
 	if err != nil {
-		c.JSON(401, gin.H{
-			"Error": "Invalid Username",
-		})
-		c.Abort()
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Email or Password"})
 		return
 	}
-	err = user.CheckPassword(payload.Password)
-	if err != nil {
-		log.Println(err)
-		c.JSON(401, gin.H{
-			"Error": "Invalid User Credentials",
-		})
-		c.Abort()
+
+	if err := utils.CheckPassword(user.PasswordHash, user.Salt, payload.Password); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Email or Password"})
 		return
 	}
-	jwtWrapper := auth.JwtWrapper{
+	jwtWrapper := userauth.JwtWrapper{
 		SecretKey:         h.JWTKey,
 		Issuer:            "AuthService",
 		ExpirationMinutes: 30,
@@ -100,7 +91,7 @@ func (h *UserHanlder) Login(c *gin.Context) {
 }
 
 // UpdateProfile handles updating user information
-func (h *UserHanlder) UpdateProfile(c *gin.Context) {
+func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	var user modeluser.User
 	if err := c.ShouldBindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
@@ -120,20 +111,21 @@ func (h *UserHanlder) UpdateProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User updated successfully"})
 }
 
-func (h *UserHanlder) DeleteProfile(c *gin.Context) {
-	emailInterface, exists := c.Get("email") // Retrieve the email from the context
+// DeleteProfile deletes a user profile
+func (h *UserHandler) DeleteProfile(c *gin.Context) {
+	userIDInterface, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Email not provided"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
 		return
 	}
 
-	email, ok := emailInterface.(string) // Type assertion
+	userID, ok := userIDInterface.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Email is not a valid string"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID is not valid"})
 		return
 	}
 
-	if err := h.userService.DeleteUser(email); err != nil {
+	if err := h.userService.DeleteUser(userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user"})
 		return
 	}
@@ -141,9 +133,8 @@ func (h *UserHanlder) DeleteProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
 }
 
-
 // Profile retrieves the user's profile information
-func (h *UserHanlder) Profile(c *gin.Context) {
+func (h *UserHandler) Profile(c *gin.Context) {
 	userID, _ := c.Get("userID") // Retrieve the user ID from the context
 
 	user, err := h.userService.GetUserByUUID(userID.(uuid.UUID))
@@ -156,7 +147,7 @@ func (h *UserHanlder) Profile(c *gin.Context) {
 }
 
 // Renew token from the refresh token
-func (h *UserHanlder) RenewAccessToken(c *gin.Context) {
+func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 	token, err := c.Cookie("refreshToken")
 	if err != nil {
 		c.JSON(400, gin.H{
@@ -165,7 +156,7 @@ func (h *UserHanlder) RenewAccessToken(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	jwtWrapper := auth.JwtWrapper{
+	jwtWrapper := userauth.JwtWrapper{
 		SecretKey:         h.JWTKey,
 		Issuer:            "AuthService",
 		ExpirationMinutes: 30,

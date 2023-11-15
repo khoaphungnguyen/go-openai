@@ -1,18 +1,39 @@
 version: '3.9'
+
 services:
   postgres:
-    image: postgres
+    container_name: ${POSTGRES_CONTAINER_NAME}
+    image: postgres:16-alpine
     restart: always
     environment:
-      - POSTGRES_USER=acltesting
-      - POSTGRES_PASSWORD=123456
-    logging:
-      options:
-        max-size: 10m
-        max-file: "3"
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     ports:
       - '5432:5432'
-    volumes: 
+    volumes:
       - ./data:/var/lib/postgresql/data
-      # copy the sql script to create tables
-      #- ./sql/create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    command: ["-path", "/migrations", "-database", "${DATABASE_URL}", "up"]
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable

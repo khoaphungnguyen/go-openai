@@ -1,4 +1,4 @@
-package storageuser
+package userstorage
 
 import (
 	"github.com/google/uuid"
@@ -11,9 +11,9 @@ type UserStore interface {
 	Create(user *modeluser.User) error
 	GetUserByEmail(email string) (*modeluser.User, error)
 	Update(user *modeluser.User) error
-	Delete(email string) error
+	Delete(id uuid.UUID) error
 	GetUserByUUID(id uuid.UUID) (*modeluser.User, error)
-	CheckLastLogin(email string) (bool, error)
+	CheckLastLogin(id uuid.UUID) (bool, error)
 	EmailVerified(email string) (bool, error)
 }
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/khoaphungnguyen/go-openai/internal/user/auth"
+	userauth "github.com/khoaphungnguyen/go-openai/internal/user/auth"
 )
 
 // AuthMiddleware is a middleware that validates token and authorizes users
@@ -25,7 +25,7 @@ func AuthMiddleware(secretKey string) gin.HandlerFunc {
 			return
 		}
 
-		jwtWrapper := auth.JwtWrapper{
+		jwtWrapper := userauth.JwtWrapper{
 			SecretKey: secretKey,
 			Issuer:    "AuthService",
 		}
