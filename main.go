@@ -3,13 +3,26 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	"github.com/sashabaranov/go-openai"
 )
+
+var (
+	client *openai.Client
+)
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Adjust the origin checking for production
+	},
+}
 
 func main() {
 	// Load environment variables from .env file
@@ -26,68 +39,70 @@ func main() {
 	}
 
 	// Initialize OpenAI client
-	client := openai.NewClient(apiKey)
+	client = openai.NewClient(apiKey)
 
-	// Initialize the Chi router
-	r := chi.NewRouter()
+	// Initialize the Gin router
+	router := gin.Default()
 
-	// Define the endpoint for chat
-	r.Get("/chat", func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
-			return
-		}
+	// CORS middleware for Gin
+	router.Use(CORSMiddleware())
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Transfer-Encoding", "chunked")
-
-		// Set up a channel to receive messages from OpenAI
-		messageChan := make(chan string)
-
-		// Start a go routine to stream from OpenAI
-		go func() {
-			defer close(messageChan)
-			for {
-				select {
-				case <-r.Context().Done():
-					return
-				default:
-					responseContent, err := chatHandler(client, "Your prompt here")
-					if err != nil {
-						fmt.Printf("Error calling OpenAI: %v\n", err)
-						return
-					}
-					messageChan <- responseContent
-				}
-			}
-		}()
-
-		// Stream messages to the client
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case message := <-messageChan:
-				fmt.Fprintf(w, "data: %s\n\n", message)
-				flusher.Flush()
-			}
-		}
+	// WebSocket endpoint
+	router.GET("/ws", func(c *gin.Context) {
+		wsHandler(c.Writer, c.Request)
 	})
 
 	// Start the HTTP server
 	fmt.Println("The server is started on port 8000")
-	http.ListenAndServe(":8000", r)
+	router.Run(":8000") // Defaults to ":8080" if not specified
 }
 
-// callOpenAI interacts with the OpenAI API and returns the response content
-func chatHandler(client *openai.Client, userMessage string) (string, error) {
+// CORSMiddleware defines CORS policy for Gin
+func CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*") // Set to specific origin in production
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+		c.Writer.Header().Set("Content-Type", "application/json")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// wsHandler handles WebSocket connections
+func wsHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("Upgrade error:", err)
+		return
+	}
+	defer conn.Close()
+
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("Error: %v", err)
+			}
+			break // Exit the loop; the connection is closed.
+		}
+
+		// Handle the message
+		go chatHandler(client, string(message), conn)
+	}
+}
+
+// chatHandler interacts with the OpenAI API and streams the response content
+func chatHandler(client *openai.Client, userMessage string, conn *websocket.Conn) {
 	// Set up the chat completion request
 	req := openai.ChatCompletionRequest{
-		Model:     "gpt-3.5-turbo",
-		MaxTokens: 20,
+		Model:     "gpt-3.5-turbo-1106",
+		MaxTokens: 100,
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
@@ -99,20 +114,27 @@ func chatHandler(client *openai.Client, userMessage string) (string, error) {
 	// Create the chat completion stream
 	stream, err := client.CreateChatCompletionStream(context.Background(), req)
 	if err != nil {
-		return "", err
+		log.Printf("CreateChatCompletionStream error: %v\n", err)
+		return
 	}
 	defer stream.Close()
 
-	// Read the response from the stream
-	saveContent := ""
+	// Stream the response from OpenAI to the WebSocket
 	for {
 		response, err := stream.Recv()
 		if err != nil {
+			if err == io.EOF {
+				log.Println("Stream finished")
+			} else {
+				log.Printf("Stream error: %v\n", err)
+			}
 			break
 		}
-		saveContent += response.Choices[0].Delta.Content
-	}
 
-	// Return the concatenated responses
-	return saveContent, nil
+		// Send the response over the WebSocket
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(response.Choices[0].Delta.Content)); err != nil {
+			log.Println("Write error:", err)
+			return
+		}
+	}
 }
