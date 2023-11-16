@@ -1,7 +1,6 @@
 package usergin
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -32,7 +31,6 @@ func (h *UserHandler) Signup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
-	fmt.Println(&user)
 	if err := h.userService.CreateUser(&user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
@@ -59,13 +57,16 @@ func (h *UserHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Email or Password"})
 		return
 	}
+
 	jwtWrapper := userauth.JwtWrapper{
 		SecretKey:         h.JWTKey,
 		Issuer:            "AuthService",
 		ExpirationMinutes: 30,
 		ExpirationHours:   12,
 	}
-	signedToken, err := jwtWrapper.GenerateToken(user.Email)
+
+	// Generate JWT token with user's UUID and full name
+	signedToken, err := jwtWrapper.GenerateToken(user.ID.String(), user.FullName)
 	if err != nil {
 		log.Println(err)
 		c.JSON(500, gin.H{
@@ -74,15 +75,18 @@ func (h *UserHandler) Login(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	signedRefreshToken, err := jwtWrapper.RefreshToken(user.Email)
+
+	// Generate refresh token with user's UUID and full name
+	signedRefreshToken, err := jwtWrapper.RefreshToken(user.ID.String(), user.FullName)
 	if err != nil {
 		log.Println(err)
 		c.JSON(500, gin.H{
-			"Error": "Error Signing Token",
+			"Error": "Error Signing Refresh Token",
 		})
 		c.Abort()
 		return
 	}
+
 	token := LoginResponse{
 		Token:        signedToken,
 		RefreshToken: signedRefreshToken,
@@ -92,18 +96,37 @@ func (h *UserHandler) Login(c *gin.Context) {
 
 // UpdateProfile handles updating user information
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
-	var user modeluser.User
-	if err := c.ShouldBindJSON(&user); err != nil {
+	var payload modeluser.UserUpdatePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
-	userID, _ := c.Get("userID") // Retrieve the user ID from the context
 
-	// Assume you have a method to convert the userID to the correct type
-	// and that your UpdateUser method accepts a user model with ID set
-	user.ID = userID.(uuid.UUID)
+	userIDStr, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
+		return
+	}
 
-	if err := h.userService.UpdateUser(&user); err != nil {
+	userID, err := uuid.Parse(userIDStr.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	// Retrieve the existing user data
+	user, err := h.userService.GetUserByUUID(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Update the user data with the payload
+	user.FullName = payload.FullName
+	user.Email = payload.Email
+
+	// Update the user in the database
+	if err := h.userService.UpdateUser(user); err != nil { // No '&' before user
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
 		return
 	}
@@ -111,7 +134,6 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User updated successfully"})
 }
 
-// DeleteProfile deletes a user profile
 func (h *UserHandler) DeleteProfile(c *gin.Context) {
 	userIDInterface, exists := c.Get("userID")
 	if !exists {
@@ -119,9 +141,15 @@ func (h *UserHandler) DeleteProfile(c *gin.Context) {
 		return
 	}
 
-	userID, ok := userIDInterface.(uuid.UUID)
+	userIDStr, ok := userIDInterface.(string)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID is not valid"})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
 		return
 	}
 
@@ -135,20 +163,31 @@ func (h *UserHandler) DeleteProfile(c *gin.Context) {
 
 // Profile retrieves the user's profile information
 func (h *UserHandler) Profile(c *gin.Context) {
-	userID, _ := c.Get("userID") // Retrieve the user ID from the context
+	userIDStr, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
 
-	user, err := h.userService.GetUserByUUID(userID.(uuid.UUID))
+	userID, err := uuid.Parse(userIDStr.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	user, err := h.userService.GetUserByUUID(userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	publicUser := user.ToPublicUser()
+	c.JSON(http.StatusOK, publicUser)
 }
 
 // Renew token from the refresh token
 func (h *UserHandler) RenewAccessToken(c *gin.Context) {
-	token, err := c.Cookie("refreshToken")
+	refreshToken, err := c.Cookie("refreshToken")
 	if err != nil {
 		c.JSON(400, gin.H{
 			"Error": "Invalid Inputs",
@@ -156,13 +195,15 @@ func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 		c.Abort()
 		return
 	}
+
 	jwtWrapper := userauth.JwtWrapper{
 		SecretKey:         h.JWTKey,
 		Issuer:            "AuthService",
 		ExpirationMinutes: 30,
 		ExpirationHours:   12,
 	}
-	claims, err := jwtWrapper.ValidateToken(token)
+
+	claims, err := jwtWrapper.ValidateToken(refreshToken)
 	if err != nil {
 		c.JSON(401, gin.H{
 			"Error": "Invalid Token",
@@ -170,23 +211,18 @@ func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	if claims.ExpiresAt < time.Now().Add(time.Minute*30).Unix() {
+
+	// Ensure the token is not expired
+	if claims.ExpiresAt < time.Now().UTC().Unix() {
 		c.JSON(401, gin.H{
 			"Error": "Token is expired",
 		})
 		c.Abort()
 		return
 	}
-	// convert id to int
-	email := claims.Audience
-	if err != nil {
-		c.JSON(401, gin.H{
-			"Error": "Invalid Token",
-		})
-		c.Abort()
-		return
-	}
-	signedToken, err := jwtWrapper.GenerateToken(email)
+
+	// Use the claims from the refresh token to generate a new access token
+	newAccessToken, err := jwtWrapper.GenerateToken(claims.UserID, claims.FullName)
 	if err != nil {
 		log.Println(err)
 		c.JSON(500, gin.H{
@@ -195,9 +231,8 @@ func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	token = signedToken
-	c.JSON(200, gin.H{
-		"token": token,
-	})
 
+	c.JSON(200, gin.H{
+		"token": newAccessToken,
+	})
 }

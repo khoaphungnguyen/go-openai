@@ -18,10 +18,12 @@ func HashPassword(password string) (string, string, error) {
 }
 
 func CheckPassword(storedPassword, storedSalt, providedPassword string) error {
+
 	salt, err := base64.StdEncoding.DecodeString(storedSalt)
 	if err != nil {
 		return err
 	}
+
 	hash := argon2.IDKey([]byte(providedPassword), salt, 1, 64*1024, 4, 32)
 	if storedPassword != base64.StdEncoding.EncodeToString(hash) {
 		return errors.New("invalid password")

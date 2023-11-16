@@ -9,20 +9,18 @@ import (
 )
 
 func (s *UserService) CreateUser(user *modeluser.User) error {
-    // Hash the password
-    hashedPassword, salt, err := utils.HashPassword(user.Password)
-    if err != nil {
-        return err
-    }
-    
-    // Store the hashed password and salt in the user struct
-    user.PasswordHash = hashedPassword 
-    user.Salt = salt        
-	          
-    // Save the user to the database
-    return s.userStore.Create(user)
-}
+	// Hash the password
+	hashedPassword, salt, err := utils.HashPassword(user.Password)
+	if err != nil {
+		return err
+	}
+	// Store the hashed password and salt in the user struct
+	user.PasswordHash = hashedPassword
+	user.Salt = salt
 
+	// Save the user to the database
+	return s.userStore.Create(user)
+}
 
 func (s *UserService) UpdateUser(user *modeluser.User) error {
 	if user.PasswordHash != "" {

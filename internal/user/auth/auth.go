@@ -15,12 +15,22 @@ type JwtWrapper struct {
 	ExpirationHours   int64  // Expiration time of the JWT token in hours
 }
 
-// GenerateToken generates a jwt token with email as the subject
-func (j *JwtWrapper) GenerateToken(email string) (signedToken string, err error) {
-	claims := &jwt.StandardClaims{
-		Subject:   email,
-		ExpiresAt: time.Now().UTC().Add(time.Minute * time.Duration(j.ExpirationMinutes)).Unix(),
-		Issuer:    j.Issuer,
+// CustomClaims extends the standard jwt claims
+type CustomClaims struct {
+	UserID   string `json:"userId"`
+	FullName string `json:"fullName"`
+	jwt.StandardClaims
+}
+
+// GenerateToken generates a jwt token with custom claims
+func (j *JwtWrapper) GenerateToken(userID, fullName string) (signedToken string, err error) {
+	claims := &CustomClaims{
+		UserID:   userID,
+		FullName: fullName,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: time.Now().UTC().Add(time.Minute * time.Duration(j.ExpirationMinutes)).Unix(),
+			Issuer:    j.Issuer,
+		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signedToken, err = token.SignedString([]byte(j.SecretKey))
@@ -31,11 +41,14 @@ func (j *JwtWrapper) GenerateToken(email string) (signedToken string, err error)
 }
 
 // RefreshToken generates a refresh jwt token with a longer lifespan
-func (j *JwtWrapper) RefreshToken(email string) (signedtoken string, err error) {
-	claims := &jwt.StandardClaims{
-		Subject:   email,
-		ExpiresAt: time.Now().UTC().Add(time.Hour * time.Duration(j.ExpirationHours)).Unix(),
-		Issuer:    j.Issuer,
+func (j *JwtWrapper) RefreshToken(userID, fullName string) (signedtoken string, err error) {
+	claims := &CustomClaims{
+		UserID:   userID,
+		FullName: fullName,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: time.Now().UTC().Add(time.Hour * time.Duration(j.ExpirationHours)).Unix(),
+			Issuer:    j.Issuer,
+		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signedtoken, err = token.SignedString([]byte(j.SecretKey))
@@ -46,16 +59,15 @@ func (j *JwtWrapper) RefreshToken(email string) (signedtoken string, err error) 
 }
 
 // ValidateToken validates the jwt token
-func (j *JwtWrapper) ValidateToken(signedToken string) (claims *jwt.StandardClaims, err error) {
+func (j *JwtWrapper) ValidateToken(signedToken string) (*CustomClaims, error) {
 	token, err := jwt.ParseWithClaims(
 		signedToken,
-		&jwt.StandardClaims{},
+		&CustomClaims{},
 		func(token *jwt.Token) (interface{}, error) {
 			// Validate the alg is what you expect:
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-
 			return []byte(j.SecretKey), nil
 		},
 	)
@@ -64,7 +76,7 @@ func (j *JwtWrapper) ValidateToken(signedToken string) (claims *jwt.StandardClai
 		return nil, fmt.Errorf("error parsing token: %w", err)
 	}
 
-	claims, ok := token.Claims.(*jwt.StandardClaims)
+	claims, ok := token.Claims.(*CustomClaims)
 	if !ok {
 		return nil, errors.New("could not parse claims")
 	}
@@ -72,5 +84,5 @@ func (j *JwtWrapper) ValidateToken(signedToken string) (claims *jwt.StandardClai
 	if claims.ExpiresAt < time.Now().UTC().Unix() {
 		return nil, errors.New("JWT is expired")
 	}
-	return
+	return claims, nil
 }

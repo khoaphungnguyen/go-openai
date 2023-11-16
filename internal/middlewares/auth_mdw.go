@@ -37,9 +37,8 @@ func AuthMiddleware(secretKey string) gin.HandlerFunc {
 			return
 		}
 
-		// Since Audience (Subject) in your JWT is the email, and not an ID,
-		// it would be more appropriate to set the email in the context instead of converting it to an int.
-		c.Set("email", claims.Subject)
+		// Extract and set the user's UUID in the context
+		c.Set("userID", claims.UserID)
 		c.Next()
 	}
 }
