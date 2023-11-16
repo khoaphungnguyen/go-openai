@@ -64,22 +64,25 @@ func (store *userStore) EmailVerified(email string) (bool, error) {
 	return user.EmailVerified, nil
 }
 
-// CheckLastLogin checks when the user last logged in
+// CheckLastLogin checks if the user exists and has an active session
 func (store *userStore) CheckLastLogin(id uuid.UUID) (bool, error) {
 	var user modeluser.User
 	err := store.db.Where("id = ?", id).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, errors.New("user not found")
+			// User not found or soft-deleted, treat as inactive
+			return false, nil
 		}
+		// Other errors are treated as server errors
 		return false, err
 	}
+	// User exists and is active
+	return true, nil
+}
 
-	tokenRefreshDuration := 30 * 24 * time.Hour
-	if user.LastLogin == nil || time.Since(*user.LastLogin) > tokenRefreshDuration {
-		return false, nil // Token should be refreshed or user never logged in
-	}
-	return true, nil // Last login is within the required duration
+// UpdateLastLogin updates the last login time field in the database
+func (store *userStore) UpdateLastLogin(userID uuid.UUID, lastLogin *time.Time) error {
+	return store.db.Model(&modeluser.User{}).Where("id = ?", userID).Update("last_login", lastLogin).Error
 }
 
 // IsEmailExists checks if the email exists for any user other than the one with the given UUID

@@ -58,6 +58,21 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Store the last login time before updating it
+	var lastLoginStr string
+	if user.LastLogin != nil {
+		lastLoginStr = user.LastLogin.Format(time.RFC3339)
+	}
+
+	// Update the last login time without affecting other fields
+	now := time.Now()
+	err = h.userService.UpdateLastLogin(user.ID, &now)
+	if err != nil {
+		log.Println(err)
+		c.JSON(500, gin.H{"error": "Failed to update last login time"})
+		return
+	}
+
 	jwtWrapper := userauth.JwtWrapper{
 		SecretKey:         h.JWTKey,
 		Issuer:            "AuthService",
@@ -69,9 +84,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 	signedToken, err := jwtWrapper.GenerateToken(user.ID.String(), user.FullName)
 	if err != nil {
 		log.Println(err)
-		c.JSON(500, gin.H{
-			"Error": "Error Signing Token",
-		})
+		c.JSON(500, gin.H{"Error": "Error Signing Token"})
 		c.Abort()
 		return
 	}
@@ -80,18 +93,102 @@ func (h *UserHandler) Login(c *gin.Context) {
 	signedRefreshToken, err := jwtWrapper.RefreshToken(user.ID.String(), user.FullName)
 	if err != nil {
 		log.Println(err)
-		c.JSON(500, gin.H{
-			"Error": "Error Signing Refresh Token",
+		c.JSON(500, gin.H{"Error": "Error Signing Refresh Token"})
+		c.Abort()
+		return
+	}
+
+	// Set the refresh token in an HTTP-only cookie
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "refreshToken",
+		Value:    signedRefreshToken,
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   true, // Set to true if using HTTPS
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(jwtWrapper.ExpirationHours * 3600),
+	})
+
+	// Return the access token and last login time in the JSON response
+	c.JSON(200, gin.H{
+		"token":     signedToken,
+		"lastLogin": lastLoginStr,
+	})
+}
+
+// Renew token from the refresh token
+func (h *UserHandler) RenewAccessToken(c *gin.Context) {
+	refreshToken, err := c.Cookie("refreshToken")
+	if err != nil {
+		c.JSON(400, gin.H{
+			"Error": "Invalid Inputs",
 		})
 		c.Abort()
 		return
 	}
 
-	token := LoginResponse{
-		Token:        signedToken,
-		RefreshToken: signedRefreshToken,
+	jwtWrapper := userauth.JwtWrapper{
+		SecretKey:         h.JWTKey,
+		Issuer:            "AuthService",
+		ExpirationMinutes: 30,
+		ExpirationHours:   12,
 	}
-	c.JSON(200, token)
+
+	claims, err := jwtWrapper.ValidateToken(refreshToken)
+	if err != nil {
+		c.JSON(401, gin.H{
+			"Error": "Invalid Token",
+		})
+		c.Abort()
+		return
+	}
+
+	if claims.ExpiresAt < time.Now().UTC().Unix() {
+		c.JSON(401, gin.H{
+			"Error": "Token is expired",
+		})
+		c.Abort()
+		return
+	}
+
+	// Parse UUID from the claims
+	userID, err := uuid.Parse(claims.UserID)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"Error": "Error parsing user ID",
+		})
+		c.Abort()
+		return
+	}
+
+	isActive, err := h.userService.CheckLastLogin(userID)
+	if err != nil {
+		// Handle server errors separately
+		c.JSON(500, gin.H{"Error": "Server error checking user status"})
+		c.Abort()
+		return
+	}
+	if !isActive {
+		// User is not active, possibly due to being soft-deleted
+		c.JSON(401, gin.H{"Error": "Inactive account. Restore to continue."})
+		c.Abort()
+		return
+	}
+
+	// Generate a new access token
+	newAccessToken, err := jwtWrapper.GenerateToken(claims.UserID, claims.FullName)
+	if err != nil {
+		log.Println(err)
+		c.JSON(500, gin.H{
+			"Error": "Error signing new token",
+		})
+		c.Abort()
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"token": newAccessToken, // Return the new access token in the JSON response
+	})
 }
 
 // UpdateProfile handles updating user information
@@ -218,56 +315,4 @@ func (h *UserHandler) Profile(c *gin.Context) {
 
 	publicUser := user.ToPublicUser()
 	c.JSON(http.StatusOK, publicUser)
-}
-
-// Renew token from the refresh token
-func (h *UserHandler) RenewAccessToken(c *gin.Context) {
-	refreshToken, err := c.Cookie("refreshToken")
-	if err != nil {
-		c.JSON(400, gin.H{
-			"Error": "Invalid Inputs",
-		})
-		c.Abort()
-		return
-	}
-
-	jwtWrapper := userauth.JwtWrapper{
-		SecretKey:         h.JWTKey,
-		Issuer:            "AuthService",
-		ExpirationMinutes: 30,
-		ExpirationHours:   12,
-	}
-
-	claims, err := jwtWrapper.ValidateToken(refreshToken)
-	if err != nil {
-		c.JSON(401, gin.H{
-			"Error": "Invalid Token",
-		})
-		c.Abort()
-		return
-	}
-
-	// Ensure the token is not expired
-	if claims.ExpiresAt < time.Now().UTC().Unix() {
-		c.JSON(401, gin.H{
-			"Error": "Token is expired",
-		})
-		c.Abort()
-		return
-	}
-
-	// Use the claims from the refresh token to generate a new access token
-	newAccessToken, err := jwtWrapper.GenerateToken(claims.UserID, claims.FullName)
-	if err != nil {
-		log.Println(err)
-		c.JSON(500, gin.H{
-			"Error": "Error Signing Token",
-		})
-		c.Abort()
-		return
-	}
-
-	c.JSON(200, gin.H{
-		"token": newAccessToken,
-	})
 }

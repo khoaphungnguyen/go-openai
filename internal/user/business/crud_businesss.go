@@ -2,6 +2,7 @@ package userbusiness
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	modeluser "github.com/khoaphungnguyen/go-openai/internal/user/model"
@@ -33,6 +34,11 @@ func (s *UserService) UpdateUser(user *modeluser.User) error {
 	}
 
 	return s.userStore.Update(user)
+}
+
+// UpdateLastLogin updates only the last login time of the user
+func (s *UserService) UpdateLastLogin(userID uuid.UUID, lastLogin *time.Time) error {
+	return s.userStore.UpdateLastLogin(userID, lastLogin)
 }
 
 func (s *UserService) DeleteUser(id uuid.UUID) error {
@@ -77,4 +83,8 @@ func (s *UserService) SoftDeleteUser(id uuid.UUID) error {
 // RestoreUser reactivates a soft-deleted user
 func (s *UserService) RestoreUser(id uuid.UUID) error {
 	return s.userStore.Restore(id)
+}
+
+func (s *UserService) CheckLastLogin(userID uuid.UUID) (bool, error) {
+	return s.userStore.CheckLastLogin(userID)
 }

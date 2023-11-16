@@ -60,7 +60,7 @@ func setupRouter(userHandler *usergin.UserHandler) *gin.Engine {
 	{
 		auth.POST("/login", userHandler.Login)
 		auth.POST("/signup", userHandler.Signup)
-		auth.POST("/refresh", userHandler.RenewAccessToken)
+		auth.POST("/token/renew", userHandler.RenewAccessToken)
 	}
 
 	// Create protected route
