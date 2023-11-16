@@ -114,10 +114,16 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	// Retrieve the existing user data
+	// Retrieve the current user data
 	user, err := h.userService.GetUserByUUID(userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Check if the new email already exists for another user
+	if payload.Email != user.Email && h.userService.IsEmailExists(payload.Email, user.ID) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Email already in use."})
 		return
 	}
 
@@ -126,7 +132,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	user.Email = payload.Email
 
 	// Update the user in the database
-	if err := h.userService.UpdateUser(user); err != nil { // No '&' before user
+	if err := h.userService.UpdateUser(user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
 		return
 	}
@@ -134,6 +140,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User updated successfully"})
 }
 
+// DeleteProfile handles the soft deletion of a user profile
 func (h *UserHandler) DeleteProfile(c *gin.Context) {
 	userIDInterface, exists := c.Get("userID")
 	if !exists {
@@ -153,12 +160,40 @@ func (h *UserHandler) DeleteProfile(c *gin.Context) {
 		return
 	}
 
-	if err := h.userService.DeleteUser(userID); err != nil {
+	if err := h.userService.SoftDeleteUser(userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+}
+
+// RestoreProfile handles reactivating a soft-deleted user profile
+func (h *UserHandler) RestoreProfile(c *gin.Context) {
+	userIDInterface, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
+		return
+	}
+
+	userIDStr, ok := userIDInterface.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID is not valid"})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	if err := h.userService.RestoreUser(userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to restore user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User restored successfully"})
 }
 
 // Profile retrieves the user's profile information

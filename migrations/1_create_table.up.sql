@@ -1,15 +1,16 @@
 -- User Table
 CREATE TABLE "user" (
   id UUID PRIMARY KEY,
-  full_name VARCHAR(100) NOT NULL,  
+  full_name VARCHAR(100) NOT NULL,
   email VARCHAR(50) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,  
-  salt VARCHAR(255),                    
+  password_hash VARCHAR(255) NOT NULL,
+  salt VARCHAR(255),
   role VARCHAR(10) DEFAULT 'user',
   email_verified BOOLEAN DEFAULT FALSE,
   last_login TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ DEFAULT NULL
 );
 
 -- Updated Chat Message Table to include user questions and OpenAI responses

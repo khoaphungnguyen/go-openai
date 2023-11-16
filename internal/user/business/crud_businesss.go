@@ -63,3 +63,18 @@ func (s *UserService) VerifyUserPassword(email, password string) (bool, error) {
 
 	return false, errors.New("user not found")
 }
+
+// IsEmailExists checks if the provided email exists for any user other than the one with the given UUID
+func (s *UserService) IsEmailExists(email string, excludeUserID uuid.UUID) bool {
+	return s.userStore.IsEmailExists(email, excludeUserID)
+}
+
+// SoftDeleteUser marks a user as deleted without actually removing them from the database
+func (s *UserService) SoftDeleteUser(id uuid.UUID) error {
+	return s.userStore.SoftDelete(id)
+}
+
+// RestoreUser reactivates a soft-deleted user
+func (s *UserService) RestoreUser(id uuid.UUID) error {
+	return s.userStore.Restore(id)
+}

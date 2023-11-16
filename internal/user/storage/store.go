@@ -15,6 +15,9 @@ type UserStore interface {
 	GetUserByUUID(id uuid.UUID) (*modeluser.User, error)
 	CheckLastLogin(id uuid.UUID) (bool, error)
 	EmailVerified(email string) (bool, error)
+	IsEmailExists(email string, excludeUserID uuid.UUID) bool
+	SoftDelete(id uuid.UUID) error
+	Restore(id uuid.UUID) error 
 }
 
 // userStore implements the UserStore interface with gorm.DB

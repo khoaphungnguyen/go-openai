@@ -68,6 +68,7 @@ func setupRouter(userHandler *usergin.UserHandler) *gin.Engine {
 	{
 		protected.GET("/profile", userHandler.Profile)
 		protected.PUT("/profile", userHandler.UpdateProfile)
+		protected.PUT("/profile/restore", userHandler.RestoreProfile)
 		protected.DELETE("/profile", userHandler.DeleteProfile)
 	}
 	return r
