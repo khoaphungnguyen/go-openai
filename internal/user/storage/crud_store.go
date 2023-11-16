@@ -18,7 +18,7 @@ func (store *userStore) Create(user *modeluser.User) error {
 // GetUserByEmail finds a user by email
 func (store *userStore) GetUserByEmail(email string) (*modeluser.User, error) {
 	var user modeluser.User
-	err := store.db.Where("email = ?", email).First(&user).Error
+	err := store.db.Unscoped().Where("email = ?", email).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("user not found")
@@ -26,11 +26,6 @@ func (store *userStore) GetUserByEmail(email string) (*modeluser.User, error) {
 		return nil, err
 	}
 	return &user, nil
-}
-
-// Update modifies an existing user in the database
-func (store *userStore) Update(user *modeluser.User) error {
-	return store.db.Omit("password").Save(user).Error
 }
 
 // Delete removes a user from the database by UUID
@@ -88,7 +83,9 @@ func (store *userStore) UpdateLastLogin(userID uuid.UUID, lastLogin *time.Time) 
 // IsEmailExists checks if the email exists for any user other than the one with the given UUID
 func (store *userStore) IsEmailExists(email string, excludeUserID uuid.UUID) bool {
 	var count int64
-	store.db.Model(&modeluser.User{}).Where("email = ? AND id != ?", email, excludeUserID).Count(&count)
+	store.db.Model(&modeluser.User{}).
+		Where("email = ? AND id != ?", email, excludeUserID).
+		Count(&count)
 	return count > 0
 }
 
@@ -99,4 +96,14 @@ func (store *userStore) SoftDelete(id uuid.UUID) error {
 // Restore reactivates a soft-deleted user by clearing the DeletedAt field
 func (store *userStore) Restore(id uuid.UUID) error {
 	return store.db.Model(&modeluser.User{}).Unscoped().Where("id = ?", id).Update("deleted_at", gorm.Expr("NULL")).Error
+}
+
+// Update modifies an existing user in the database
+func (store *userStore) Update(user *modeluser.User) error {
+	return store.db.Omit("password").Save(user).Error
+}
+
+// UpdateOmitFields modifies an existing user in the database while omitting specified fields
+func (store *userStore) UpdateOmitFields(user *modeluser.User, omitFields ...string) error {
+	return store.db.Model(user).Omit(omitFields...).Save(user).Error
 }

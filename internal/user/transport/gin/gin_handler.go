@@ -1,6 +1,7 @@
 package usergin
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -217,6 +218,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
+	fmt.Println("email", user.Email, payload.Email)
 
 	// Check if the new email already exists for another user
 	if payload.Email != user.Email && h.userService.IsEmailExists(payload.Email, user.ID) {
@@ -229,7 +231,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	user.Email = payload.Email
 
 	// Update the user in the database
-	if err := h.userService.UpdateUser(user); err != nil {
+	if err := h.userService.UpdateUser(user, false); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
 		return
 	}

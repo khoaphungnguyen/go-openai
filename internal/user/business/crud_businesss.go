@@ -23,19 +23,6 @@ func (s *UserService) CreateUser(user *modeluser.User) error {
 	return s.userStore.Create(user)
 }
 
-func (s *UserService) UpdateUser(user *modeluser.User) error {
-	if user.PasswordHash != "" {
-		hashedPassword, salt, err := utils.HashPassword(user.PasswordHash)
-		if err != nil {
-			return err
-		}
-		user.PasswordHash = hashedPassword
-		user.Salt = salt
-	}
-
-	return s.userStore.Update(user)
-}
-
 // UpdateLastLogin updates only the last login time of the user
 func (s *UserService) UpdateLastLogin(userID uuid.UUID, lastLogin *time.Time) error {
 	return s.userStore.UpdateLastLogin(userID, lastLogin)
@@ -73,6 +60,21 @@ func (s *UserService) VerifyUserPassword(email, password string) (bool, error) {
 // IsEmailExists checks if the provided email exists for any user other than the one with the given UUID
 func (s *UserService) IsEmailExists(email string, excludeUserID uuid.UUID) bool {
 	return s.userStore.IsEmailExists(email, excludeUserID)
+}
+
+func (s *UserService) UpdateUser(user *modeluser.User, updatePassword bool) error {
+	if updatePassword {
+		hashedPassword, salt, err := utils.HashPassword(user.PasswordHash)
+		if err != nil {
+			return err
+		}
+		user.PasswordHash = hashedPassword
+		user.Salt = salt
+		return s.userStore.Update(user) // Here, the password and salt are included in the update.
+	} else {
+		// Call the new UpdateOmitFields method, specifying the fields to omit.
+		return s.userStore.UpdateOmitFields(user, "password_hash", "salt", "password")
+	}
 }
 
 // SoftDeleteUser marks a user as deleted without actually removing them from the database

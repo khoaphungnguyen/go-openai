@@ -21,6 +21,7 @@ type UserStore interface {
 	IsEmailExists(email string, excludeUserID uuid.UUID) bool
 	SoftDelete(id uuid.UUID) error
 	Restore(id uuid.UUID) error
+	UpdateOmitFields(user *modeluser.User, omitFields ...string) error
 }
 
 // userStore implements the UserStore interface with gorm.DB
