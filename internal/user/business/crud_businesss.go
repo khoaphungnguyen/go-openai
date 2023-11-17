@@ -87,6 +87,10 @@ func (s *UserService) RestoreUser(id uuid.UUID) error {
 	return s.userStore.Restore(id)
 }
 
+func (s *UserService) IsSoftDeleted(userID uuid.UUID) (bool, error) {
+    return s.userStore.IsSoftDeleted(userID)
+}
+
 func (s *UserService) CheckLastLogin(userID uuid.UUID) (bool, error) {
 	return s.userStore.CheckLastLogin(userID)
 }

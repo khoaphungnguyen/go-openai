@@ -259,12 +259,24 @@ func (h *UserHandler) DeleteProfile(c *gin.Context) {
 		return
 	}
 
-	if err := h.userService.SoftDeleteUser(userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user"})
+	// Check if the user is already soft-deleted
+	isSoftDeleted, err := h.userService.IsSoftDeleted(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check account's status"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+	if isSoftDeleted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User account is already inactive"})
+		return
+	}
+
+	if err := h.userService.SoftDeleteUser(userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete your account"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Your account is deleted successfully"})
 }
 
 // RestoreProfile handles reactivating a soft-deleted user profile
@@ -287,12 +299,24 @@ func (h *UserHandler) RestoreProfile(c *gin.Context) {
 		return
 	}
 
-	if err := h.userService.RestoreUser(userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to restore user"})
+	// Check if the user is soft-deleted
+	isSoftDeleted, err := h.userService.IsSoftDeleted(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check account's status"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "User restored successfully"})
+	if !isSoftDeleted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Your account is already active"})
+		return
+	}
+
+	if err := h.userService.RestoreUser(userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to restore your account"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Your account is restored successfully"})
 }
 
 // Profile retrieves the user's profile information

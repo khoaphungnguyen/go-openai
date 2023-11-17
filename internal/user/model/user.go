@@ -15,7 +15,7 @@ const (
 )
 
 type User struct {
-	ID            uuid.UUID      `gorm:"primaryKey;type:uuid;" json:"id"`
+	ID            uuid.UUID      `gorm:"primaryKey;type:uuid;default:uuid_generate_v4()" json:"id"`
 	FullName      string         `gorm:"column:full_name;type:varchar(100);not null" json:"fullName"`
 	Email         string         `gorm:"column:email;type:varchar(50);unique;not null" json:"email"`
 	Password      string         `gorm:"column:password;type:varchar(255);" json:"password"`
@@ -29,13 +29,7 @@ type User struct {
 	UpdatedAt     time.Time      `gorm:"column:updated_at;default:now()" json:"updatedAt"`
 }
 
-func (User) TableName() string { return "user" }
-
-// BeforeCreate hook is retained for UUID generation
-func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
-	u.ID = uuid.New()
-	return
-}
+func (User) TableName() string { return "users" }
 
 // PublicUser is a struct used for sending user data to the client.
 type PublicUser struct {

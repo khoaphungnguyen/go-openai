@@ -22,6 +22,7 @@ type UserStore interface {
 	SoftDelete(id uuid.UUID) error
 	Restore(id uuid.UUID) error
 	UpdateOmitFields(user *modeluser.User, omitFields ...string) error
+	IsSoftDeleted(userID uuid.UUID) (bool, error)
 }
 
 // userStore implements the UserStore interface with gorm.DB

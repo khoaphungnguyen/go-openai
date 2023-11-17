@@ -98,6 +98,12 @@ func (store *userStore) Restore(id uuid.UUID) error {
 	return store.db.Model(&modeluser.User{}).Unscoped().Where("id = ?", id).Update("deleted_at", gorm.Expr("NULL")).Error
 }
 
+func (store *userStore) IsSoftDeleted(userID uuid.UUID) (bool, error) {
+	var count int64
+	store.db.Model(&modeluser.User{}).Where("id = ?", userID).Count(&count)
+	return count == 0, nil // If count is 0, the user is soft-deleted
+}
+
 // Update modifies an existing user in the database
 func (store *userStore) Update(user *modeluser.User) error {
 	return store.db.Omit("password").Save(user).Error

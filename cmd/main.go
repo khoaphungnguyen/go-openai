@@ -9,6 +9,9 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	chatbusiness "github.com/khoaphungnguyen/go-openai/internal/chat/business"
+	chatstorage "github.com/khoaphungnguyen/go-openai/internal/chat/storage"
+	chatgin "github.com/khoaphungnguyen/go-openai/internal/chat/transport/gin"
 	middleware "github.com/khoaphungnguyen/go-openai/internal/middlewares"
 	userbusiness "github.com/khoaphungnguyen/go-openai/internal/user/business"
 	userstorage "github.com/khoaphungnguyen/go-openai/internal/user/storage"
@@ -16,10 +19,8 @@ import (
 )
 
 func main() {
-	// Load .env file
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: .env file not found")
 	}
 
 	// Fetch JWT key and database configuration from the environment
@@ -33,43 +34,47 @@ func main() {
 		log.Fatal("DATABASE_LOCAL_URL not set in .env file")
 	}
 
-	// Initialize database connection
 	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Create a new user storage instance
-	userStore := userstorage.NewUserStore(db)
-
-	// Create a new user service
-	userService := userbusiness.NewUserService(userStore)
+	// User and Chat service setup
+	userService := userbusiness.NewUserService(userstorage.NewUserStore(db))
 	userHandler := usergin.NewUserHandler(userService, jwtKey)
 
-	r := setupRouter(userHandler)
-	if err := r.Run(":8000"); err != nil {
+	chatService := chatbusiness.NewChatService(chatstorage.NewChatStore(db))
+	chatHandler := chatgin.NewChatHandler(chatService)
+
+	router := gin.Default()
+	setupRoutes(router, userHandler, chatHandler, jwtKey)
+
+	if err := router.Run(":8000"); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
 	}
 }
 
-func setupRouter(userHandler *usergin.UserHandler) *gin.Engine {
-	r := gin.Default()
-
-	// Create a new group for the API
-	auth := r.Group("/auth")
+func setupRoutes(router *gin.Engine, userHandler *usergin.UserHandler, chatHandler *chatgin.ChatHandler, jwtKey string) {
+	auth := router.Group("/auth")
 	{
 		auth.POST("/login", userHandler.Login)
 		auth.POST("/signup", userHandler.Signup)
 		auth.POST("/token/renew", userHandler.RenewAccessToken)
 	}
 
-	// Create protected route
-	protected := r.Group("/protected").Use(middleware.AuthMiddleware(userHandler.JWTKey))
+	protected := router.Group("/protected").Use(middleware.AuthMiddleware(jwtKey))
 	{
 		protected.GET("/profile", userHandler.Profile)
 		protected.PUT("/profile", userHandler.UpdateProfile)
 		protected.PUT("/profile/restore", userHandler.RestoreProfile)
 		protected.DELETE("/profile", userHandler.DeleteProfile)
+
+		// Chat routes under protected group
+		protected.POST("/thread", chatHandler.CreateThread)
+		protected.GET("/thread/:id", chatHandler.GetThread)
+		protected.GET("/threads", chatHandler.GetAllThreads)
+		protected.DELETE("/thread/:id", chatHandler.DeleteThread)
+		protected.POST("/message", chatHandler.CreateMessage)
+		protected.GET("/threads/:threadID", chatHandler.GetMessagesByThreadID)
 	}
-	return r
 }
