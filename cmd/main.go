@@ -1,3 +1,4 @@
+// main initializes and runs the chat application server.
 package main
 
 import (
@@ -19,6 +20,7 @@ import (
 )
 
 func main() {
+	// Application setup and route configuration...
 	if err := godotenv.Load(); err != nil {
 		log.Println("Warning: .env file not found")
 	}
@@ -54,6 +56,7 @@ func main() {
 	}
 }
 
+// setupRoutes defines the HTTP routes for the application.
 func setupRoutes(router *gin.Engine, userHandler *usergin.UserHandler, chatHandler *chatgin.ChatHandler, jwtKey string) {
 	auth := router.Group("/auth")
 	{
@@ -71,7 +74,7 @@ func setupRoutes(router *gin.Engine, userHandler *usergin.UserHandler, chatHandl
 
 		// Chat routes under protected group
 		protected.POST("/thread", chatHandler.CreateThread)
-		protected.GET("/thread/:id", chatHandler.GetThread)
+		protected.GET("/thread/:id", chatHandler.GetThreadByID)
 		protected.GET("/threads", chatHandler.GetAllThreads)
 		protected.DELETE("/thread/:id", chatHandler.DeleteThread)
 		protected.POST("/message", chatHandler.CreateMessage)

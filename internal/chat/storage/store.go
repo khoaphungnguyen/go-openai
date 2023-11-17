@@ -1,3 +1,4 @@
+// chatstorage provides data persistence logic, specifically for chat models.
 package chatstorage
 
 import (
@@ -6,6 +7,8 @@ import (
 	"gorm.io/gorm"
 )
 
+
+// ChatStore provides methods for chat operations.
 type ChatStore interface {
 	CreateThread(thread *chatmodel.ChatThread) error
 	GetThreadByID(threadID uuid.UUID) (*chatmodel.ChatThread, error)
@@ -20,10 +23,12 @@ type ChatStore interface {
 	CheckThreadExistsAndBelongsToUser(threadID, userID uuid.UUID) (bool, error)
 }
 
+// chatStore encapsulates the logic for storing and retrieving chat data.
 type chatStore struct {
 	db *gorm.DB
 }
 
+// NewChatStore creates a new instance of chatStore.
 func NewChatStore(db *gorm.DB) ChatStore {
 	return &chatStore{db: db}
 }

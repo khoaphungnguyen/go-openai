@@ -1,6 +1,7 @@
 package chatgin
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -31,23 +32,17 @@ type ChatMessageResponse struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// CreateThread handles creating a new chat thread
+// CreateThread handles the creation of a new chat thread.
 func (ch *ChatHandler) CreateThread(c *gin.Context) {
 	var payload ThreadPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondWithError(c, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
 
-	userIDStr, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
-		return
-	}
-
-	userID, err := uuid.Parse(userIDStr.(string))
+	userID, err := getUserIDFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -57,138 +52,184 @@ func (ch *ChatHandler) CreateThread(c *gin.Context) {
 	}
 
 	if err := ch.chatService.CreateThread(thread); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondWithError(c, http.StatusInternalServerError, "Failed to create thread")
 		return
 	}
 
-	// Create a response object
-	response := ThreadResponse{
-		ID:        thread.ID,
-		Title:     thread.Title,
-		CreatedAt: thread.CreatedAt,
-		UpdatedAt: thread.UpdatedAt,
-	}
-
-	c.JSON(http.StatusCreated, response)
+	respondWithJSON(c, http.StatusCreated, convertToThreadResponse(thread))
 }
 
-// GetAllThreads retrieves a list of all chat threads
+// GetAllThreads handles the retrieval of all chat threads for a specific user.
 func (ch *ChatHandler) GetAllThreads(c *gin.Context) {
-	userIDStr, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
-		return
-	}
-	userID, err := uuid.Parse(userIDStr.(string))
+	userID, err := getUserIDFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	threads, err := ch.chatService.GetAllThreads(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondWithError(c, http.StatusInternalServerError, "Failed to retrieve threads")
 		return
 	}
 
-	// Convert each thread to the response format
 	var responseThreads []ThreadResponse
 	for _, thread := range threads {
-		responseThread := ThreadResponse{
-			ID:        thread.ID,
-			Title:     thread.Title,
-			CreatedAt: thread.CreatedAt,
-			UpdatedAt: thread.UpdatedAt,
-		}
-		responseThreads = append(responseThreads, responseThread)
+		responseThreads = append(responseThreads, convertToThreadResponse(&thread))
 	}
 
-	c.JSON(http.StatusOK, responseThreads)
+	respondWithJSON(c, http.StatusOK, responseThreads)
 }
 
-// GetThread handles retrieving a chat thread by its ID
-func (ch *ChatHandler) GetThread(c *gin.Context) {
-	userIDStr, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
-		return
-	}
-	userID, err := uuid.Parse(userIDStr.(string))
+// GetThreadByID handles retrieving a single chat thread by its ID.
+func (ch *ChatHandler) GetThreadByID(c *gin.Context) {
+	userID, err := getUserIDFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	threadIDStr := c.Param("id")
-	threadID, err := uuid.Parse(threadIDStr)
+	threadID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid thread ID"})
+		respondWithError(c, http.StatusBadRequest, "Invalid thread ID")
 		return
 	}
 
-	// Check if the thread exists
-	exists, err = ch.chatService.CheckThreadExists(threadID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking thread existence"})
-		return
-	}
-
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"message": "Thread not found or already deleted"})
-		return
-	}
-
-	// Retrieve the thread
 	thread, err := ch.chatService.GetThreadByID(threadID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving thread"})
+		respondWithError(c, http.StatusInternalServerError, "Error retrieving thread")
 		return
 	}
 
+	// If thread is not found, return a not found error instead of forbidden
+	if thread == nil {
+		respondWithError(c, http.StatusNotFound, "Thread not found")
+		return
+	}
+
+	// Check if the user is authorized to view the thread
 	if thread.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		respondWithError(c, http.StatusForbidden, "Access denied")
 		return
 	}
 
-	responseThread := ThreadResponse{
+	respondWithJSON(c, http.StatusOK, convertToThreadResponse(thread))
+}
+
+// CreateMessage handles creating a new message in a chat thread.
+func (ch *ChatHandler) CreateMessage(c *gin.Context) {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var message chatmodel.ChatMessage
+	if err := c.ShouldBindJSON(&message); err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid message format")
+		return
+	}
+
+	message.UserID = userID
+	if err := ch.chatService.CreateMessage(userID, &message); err != nil {
+		respondWithError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondWithJSON(c, http.StatusCreated, convertToChatMessageResponse(&message))
+}
+
+// GetMessagesByThreadID handles retrieving messages for a specific thread with pagination.
+func (ch *ChatHandler) GetMessagesByThreadID(c *gin.Context) {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	threadID, err := uuid.Parse(c.Param("threadID"))
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid thread ID")
+		return
+	}
+
+	// Check if the user is authorized to access the thread
+	if !ch.chatService.IsUserThreadOwner(threadID, userID) {
+		respondWithError(c, http.StatusForbidden, "Unauthorized access to thread")
+		return
+	}
+
+	offset, limit := parseQueryInt(c, "offset", 0), parseQueryInt(c, "limit", 10)
+	messages, err := ch.chatService.GetMessagesByThreadID(threadID, offset, limit, userID)
+	if err != nil {
+		respondWithError(c, http.StatusInternalServerError, "Failed to retrieve messages")
+		return
+	}
+
+	respondWithJSON(c, http.StatusOK, messages)
+}
+
+// DeleteThread handles the deletion of a chat thread.
+func (ch *ChatHandler) DeleteThread(c *gin.Context) {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	threadID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid thread ID")
+		return
+	}
+
+	if err := ch.chatService.DeleteThread(threadID, userID); err != nil {
+		respondWithError(c, http.StatusInternalServerError, "Failed to delete thread")
+		return
+	}
+
+	respondWithJSON(c, http.StatusOK, gin.H{"message": "Thread deleted successfully"})
+}
+
+// Helper functions
+func getUserIDFromContext(c *gin.Context) (uuid.UUID, error) {
+	userIDStr, exists := c.Get("userID")
+	if !exists {
+		return uuid.Nil, errors.New("userID not provided")
+	}
+
+	userID, err := uuid.Parse(userIDStr.(string))
+	if err != nil {
+		return uuid.Nil, errors.New("invalid user ID")
+	}
+
+	return userID, nil
+}
+
+func respondWithError(c *gin.Context, code int, message string) {
+	c.JSON(code, gin.H{"error": message})
+}
+
+func respondWithJSON(c *gin.Context, code int, payload interface{}) {
+	c.JSON(code, payload)
+}
+
+func convertToThreadResponse(thread *chatmodel.ChatThread) ThreadResponse {
+	return ThreadResponse{
 		ID:        thread.ID,
 		Title:     thread.Title,
 		CreatedAt: thread.CreatedAt,
 		UpdatedAt: thread.UpdatedAt,
 	}
-
-	c.JSON(http.StatusOK, responseThread)
 }
 
-// CreateMessage handles creating a new message in a chat thread
-func (ch *ChatHandler) CreateMessage(c *gin.Context) {
-	userIDStr, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
-		return
+// convertToChatMessageResponse converts a ChatMessage model to a ChatMessageResponse for the API.
+func convertToChatMessageResponse(message *chatmodel.ChatMessage) ChatMessageResponse {
+	if message == nil {
+		return ChatMessageResponse{} // Return empty response for nil messages
 	}
-	userID, err := uuid.Parse(userIDStr.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-	var message chatmodel.ChatMessage
-	if err := c.ShouldBindJSON(&message); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	message.UserID = userID
-	if err := ch.chatService.CreateMessage(userID, &message); err != nil {
-        if err.Error() == "thread does not exist or you do not have permission to post in it" {
-            c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-            return
-        }
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
 
-	// Create a response object
-	response := ChatMessageResponse{
+	return ChatMessageResponse{
 		ID:        message.ID,
 		ThreadID:  message.ThreadID,
 		Role:      message.Role,
@@ -196,89 +237,13 @@ func (ch *ChatHandler) CreateMessage(c *gin.Context) {
 		Content:   message.Content,
 		CreatedAt: message.CreatedAt,
 	}
-
-	c.JSON(http.StatusCreated, response)
 }
 
-// GetMessagesByThreadID handles the retrieval of chat messages for a specific thread with pagination
-func (ch *ChatHandler) GetMessagesByThreadID(c *gin.Context) {
-	userIDStr, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
-		return
-	}
-	userID, err := uuid.Parse(userIDStr.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-	threadIDStr := c.Param("threadID")
-	threadID, err := uuid.Parse(threadIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid thread ID"})
-		return
-	}
-
-	// Parse pagination parameters from the query, with defaults
-	offset := parseQueryInt(c, "offset", 0)
-	limit := parseQueryInt(c, "limit", 10)
-
-	messages, err := ch.chatService.GetMessagesByThreadID(threadID, offset, limit, userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, messages)
-}
-
-// Helper function to parse integer query parameters
+// parseQueryInt tries to parse an integer from query parameters.
 func parseQueryInt(c *gin.Context, param string, defaultValue int) int {
 	valueStr := c.DefaultQuery(param, fmt.Sprintf("%d", defaultValue))
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return defaultValue
+	if value, err := strconv.Atoi(valueStr); err == nil {
+		return value
 	}
-	return value
-}
-
-// DeleteThread handles the hard deletion of a chat thread
-func (ch *ChatHandler) DeleteThread(c *gin.Context) {
-
-	threadIDStr := c.Param("id")
-	threadID, err := uuid.Parse(threadIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid thread ID"})
-		return
-	}
-
-	// Check if the thread exists before attempting to delete
-	exists, err := ch.chatService.CheckThreadExists(threadID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check if thread exists"})
-		return
-	}
-
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Thread not found or already deleted"})
-		return
-	}
-	userIDStr, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
-		return
-	}
-	userID, err := uuid.Parse(userIDStr.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-
-	// Proceed with deletion
-	if err := ch.chatService.DeleteThread(threadID, userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete thread"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Thread deleted successfully"})
+	return defaultValue
 }
