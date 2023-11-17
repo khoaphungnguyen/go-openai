@@ -18,14 +18,15 @@ type UserStore interface {
 	CheckLastLogin(id uuid.UUID) (bool, error)
 	EmailVerified(email string) (bool, error)
 	UpdateLastLogin(userID uuid.UUID, lastLogin *time.Time) error
-	IsEmailExists(email string, excludeUserID uuid.UUID) bool
-	SoftDelete(id uuid.UUID) error
+	IsEmailExists(email string) bool
+	IsEmailExistsForOtherUser(email string, excludeUserID uuid.UUID) bool
 	Restore(id uuid.UUID) error
 	UpdateOmitFields(user *modeluser.User, omitFields ...string) error
+	SoftDelete(id uuid.UUID) error
 	IsSoftDeleted(userID uuid.UUID) (bool, error)
 }
 
-// userStore implements the UserStore interface with gorm.DB
+// userStore encapsulates the data storage logic for user operations.
 type userStore struct {
 	db *gorm.DB
 }

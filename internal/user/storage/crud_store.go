@@ -9,79 +9,73 @@ import (
 	"gorm.io/gorm"
 )
 
-// Create adds a new user to the database
+// ErrUserNotFound is the error returned when a user cannot be found.
+var ErrUserNotFound = errors.New("user not found")
+
+// Create adds a new user to the database, omitting the password field.
 func (store *userStore) Create(user *modeluser.User) error {
-	// Omit the password field when saving to the database
 	return store.db.Omit("password").Create(user).Error
 }
 
-// GetUserByEmail finds a user by email
+// GetUserByEmail finds a user by email, including soft-deleted users.
 func (store *userStore) GetUserByEmail(email string) (*modeluser.User, error) {
 	var user modeluser.User
-	err := store.db.Unscoped().Where("email = ?", email).First(&user).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("user not found")
-		}
-		return nil, err
+	result := store.db.Unscoped().Where("email = ?", email).First(&user)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrUserNotFound
 	}
-	return &user, nil
+	return &user, result.Error
 }
 
-// Delete removes a user from the database by UUID
+// A soft-delete to remove a user from the database by UUID.
 func (store *userStore) Delete(id uuid.UUID) error {
 	return store.db.Delete(&modeluser.User{}, id).Error
 }
 
-// GetUserByUUID finds a user by UUID
+// GetUserByUUID finds a user by UUID.
 func (store *userStore) GetUserByUUID(id uuid.UUID) (*modeluser.User, error) {
 	var user modeluser.User
-	err := store.db.Where("id = ?", id).First(&user).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("user not found")
-		}
-		return nil, err
+	result := store.db.Where("id = ?", id).First(&user)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrUserNotFound
 	}
-	return &user, nil
+	return &user, result.Error
 }
 
-// EmailVerified checks if the user's email has been verified
+// EmailVerified checks if a user's email has been verified.
 func (store *userStore) EmailVerified(email string) (bool, error) {
 	var user modeluser.User
-	err := store.db.Select("email_verified").Where("email = ?", email).First(&user).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, errors.New("user not found")
-		}
-		return false, err
+	result := store.db.Select("email_verified").Where("email = ?", email).First(&user)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return false, ErrUserNotFound
 	}
-	return user.EmailVerified, nil
+	return user.EmailVerified, result.Error
 }
 
-// CheckLastLogin checks if the user exists and has an active session
+// CheckLastLogin checks if the user exists and has an active session.
 func (store *userStore) CheckLastLogin(id uuid.UUID) (bool, error) {
 	var user modeluser.User
-	err := store.db.Where("id = ?", id).First(&user).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// User not found or soft-deleted, treat as inactive
-			return false, nil
-		}
-		// Other errors are treated as server errors
-		return false, err
+	result := store.db.Where("id = ?", id).First(&user)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return false, ErrUserNotFound
 	}
-	// User exists and is active
-	return true, nil
+	return result.Error == nil, result.Error
 }
 
-// UpdateLastLogin updates the last login time field in the database
+// UpdateLastLogin updates the last login time field in the database.
 func (store *userStore) UpdateLastLogin(userID uuid.UUID, lastLogin *time.Time) error {
 	return store.db.Model(&modeluser.User{}).Where("id = ?", userID).Update("last_login", lastLogin).Error
 }
 
-// IsEmailExists checks if the email exists for any user other than the one with the given UUID
-func (store *userStore) IsEmailExists(email string, excludeUserID uuid.UUID) bool {
+// IsEmailExists checks if the email exists in the system.
+func (store *userStore) IsEmailExists(email string) bool {
+	var count int64
+	store.db.Model(&modeluser.User{}).Where("email = ?", email).Count(&count)
+	return count > 0
+}
+
+// IsEmailExistsForOtherUser checks if the email exists for any user other than the one with the given UUID.
+func (store *userStore) IsEmailExistsForOtherUser(email string, excludeUserID uuid.UUID) bool {
 	var count int64
 	store.db.Model(&modeluser.User{}).
 		Where("email = ? AND id != ?", email, excludeUserID).
@@ -89,27 +83,43 @@ func (store *userStore) IsEmailExists(email string, excludeUserID uuid.UUID) boo
 	return count > 0
 }
 
+// SoftDelete marks a user as deleted without actually removing them from the database.
 func (store *userStore) SoftDelete(id uuid.UUID) error {
-	return store.db.Model(&modeluser.User{}).Where("id = ?", id).Update("deleted_at", time.Now()).Error
+	var user modeluser.User
+	// Find the user by ID
+	result := store.db.First(&user, id)
+	if result.Error != nil {
+		return result.Error // Return any error (including user not found)
+	}
+
+	// Soft delete the user
+	return store.db.Delete(&user).Error
 }
 
-// Restore reactivates a soft-deleted user by clearing the DeletedAt field
+// IsSoftDeleted checks if a user is soft-deleted.
+func (store *userStore) IsSoftDeleted(userID uuid.UUID) (bool, error) {
+	var user modeluser.User
+	result := store.db.Unscoped().Select("id, deleted_at").Where("id = ?", userID).First(&user)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return false, nil // User not found, not soft-deleted
+	}
+	if result.Error != nil {
+		return false, result.Error // Error occurred during query
+	}
+	return user.DeletedAt != nil, nil // True if DeletedAt is not nil
+}
+
+// Restore reactivates a soft-deleted user by clearing the DeletedAt field.
 func (store *userStore) Restore(id uuid.UUID) error {
 	return store.db.Model(&modeluser.User{}).Unscoped().Where("id = ?", id).Update("deleted_at", gorm.Expr("NULL")).Error
 }
 
-func (store *userStore) IsSoftDeleted(userID uuid.UUID) (bool, error) {
-	var count int64
-	store.db.Model(&modeluser.User{}).Where("id = ?", userID).Count(&count)
-	return count == 0, nil // If count is 0, the user is soft-deleted
-}
-
-// Update modifies an existing user in the database
+// Update modifies an existing user in the database.
 func (store *userStore) Update(user *modeluser.User) error {
 	return store.db.Omit("password").Save(user).Error
 }
 
-// UpdateOmitFields modifies an existing user in the database while omitting specified fields
+// UpdateOmitFields modifies an existing user in the database while omitting specified fields.
 func (store *userStore) UpdateOmitFields(user *modeluser.User, omitFields ...string) error {
 	return store.db.Model(user).Omit(omitFields...).Save(user).Error
 }

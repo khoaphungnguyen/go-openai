@@ -8,36 +8,32 @@ import (
 	userauth "github.com/khoaphungnguyen/go-openai/internal/user/auth"
 )
 
-// AuthMiddleware is a middleware that validates token and authorizes users
+const bearerSchema = "Bearer "
+
+// AuthMiddleware is a middleware that validates JWT tokens and authorizes users.
 func AuthMiddleware(secretKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		clientToken := c.GetHeader("Authorization")
-		if clientToken == "" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "No Authorization header provided"})
-			c.Abort()
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization required"})
 			return
 		}
 
-		bearerToken := strings.TrimPrefix(clientToken, "Bearer ")
-		if bearerToken == clientToken {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Incorrect Format of Authorization Token"})
-			c.Abort()
+		if !strings.HasPrefix(authHeader, bearerSchema) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid authorization format"})
 			return
 		}
 
-		jwtWrapper := userauth.JwtWrapper{
-			SecretKey: secretKey,
-			Issuer:    "AuthService",
-		}
+		tokenString := strings.TrimPrefix(authHeader, bearerSchema)
+		jwtWrapper := userauth.JwtWrapper{SecretKey: secretKey}
 
-		claims, err := jwtWrapper.ValidateToken(bearerToken)
+		claims, err := jwtWrapper.ValidateToken(tokenString)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			return
 		}
 
-		// Extract and set the user's UUID in the context
+		// Add userID to Gin context for downstream handlers
 		c.Set("userID", claims.UserID)
 		c.Next()
 	}

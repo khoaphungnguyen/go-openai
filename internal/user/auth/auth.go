@@ -1,88 +1,78 @@
 package userauth
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt"
 )
 
+const (
+	// Define the default expiration times for tokens.
+	DefaultAccessTokenDuration  = 15 * time.Minute
+	DefaultRefreshTokenDuration = 7 * 24 * time.Hour
+)
+
 type JwtWrapper struct {
-	SecretKey         string // key used for signing the JWT token
-	Issuer            string // Issuer of the JWT token
-	ExpirationMinutes int64  // Number of minutes the JWT token will be valid for
-	ExpirationHours   int64  // Expiration time of the JWT token in hours
+	SecretKey        string        // Key used for signing the JWT token
+	Issuer           string        // Issuer of the JWT token
+	AccessTokenExpiration  time.Duration // Expiration time of the JWT token
+	RefreshTokenExpiration time.Duration // Expiration time of the Refresh token
 }
 
-// CustomClaims extends the standard jwt claims
 type CustomClaims struct {
 	UserID   string `json:"userId"`
 	FullName string `json:"fullName"`
 	jwt.StandardClaims
 }
 
-// GenerateToken generates a jwt token with custom claims
-func (j *JwtWrapper) GenerateToken(userID, fullName string) (signedToken string, err error) {
+// GenerateToken generates a JWT token with custom claims.
+func (j *JwtWrapper) GenerateToken(userID, fullName string) (string, error) {
 	claims := &CustomClaims{
 		UserID:   userID,
 		FullName: fullName,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().UTC().Add(time.Minute * time.Duration(j.ExpirationMinutes)).Unix(),
+			ExpiresAt: time.Now().UTC().Add(j.AccessTokenExpiration).Unix(),
 			Issuer:    j.Issuer,
 		},
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedToken, err = token.SignedString([]byte(j.SecretKey))
-	if err != nil {
-		return "", fmt.Errorf("error signing token: %w", err)
-	}
-	return
+	return token.SignedString([]byte(j.SecretKey))
 }
 
-// RefreshToken generates a refresh jwt token with a longer lifespan
-func (j *JwtWrapper) RefreshToken(userID, fullName string) (signedtoken string, err error) {
+// RefreshToken generates a refresh JWT token with a longer lifespan.
+func (j *JwtWrapper) RefreshToken(userID, fullName string) (string, error) {
 	claims := &CustomClaims{
 		UserID:   userID,
 		FullName: fullName,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().UTC().Add(time.Hour * time.Duration(j.ExpirationHours)).Unix(),
+			ExpiresAt: time.Now().UTC().Add(j.RefreshTokenExpiration).Unix(),
 			Issuer:    j.Issuer,
 		},
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedtoken, err = token.SignedString([]byte(j.SecretKey))
-	if err != nil {
-		return "", fmt.Errorf("error signing refresh token: %w", err)
-	}
-	return
+	return token.SignedString([]byte(j.SecretKey))
 }
 
-// ValidateToken validates the jwt token
+// ValidateToken validates the JWT token.
 func (j *JwtWrapper) ValidateToken(signedToken string) (*CustomClaims, error) {
-	token, err := jwt.ParseWithClaims(
-		signedToken,
-		&CustomClaims{},
-		func(token *jwt.Token) (interface{}, error) {
-			// Validate the alg is what you expect:
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(j.SecretKey), nil
-		},
-	)
+	token, err := jwt.ParseWithClaims(signedToken, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(j.SecretKey), nil
+	})
 
-	if err != nil {
-		return nil, fmt.Errorf("error parsing token: %w", err)
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("invalid or expired token")
 	}
 
 	claims, ok := token.Claims.(*CustomClaims)
 	if !ok {
-		return nil, errors.New("could not parse claims")
+		return nil, fmt.Errorf("invalid token claims")
 	}
 
-	if claims.ExpiresAt < time.Now().UTC().Unix() {
-		return nil, errors.New("JWT is expired")
-	}
 	return claims, nil
 }

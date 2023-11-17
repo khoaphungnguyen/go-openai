@@ -1,7 +1,7 @@
 package usergin
 
 import (
-	"fmt"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -10,8 +10,13 @@ import (
 	"github.com/google/uuid"
 	userauth "github.com/khoaphungnguyen/go-openai/internal/user/auth"
 	modeluser "github.com/khoaphungnguyen/go-openai/internal/user/model"
-	"github.com/khoaphungnguyen/go-openai/internal/user/utils"
 )
+
+type UserRegistration struct {
+	FullName string `json:"fullName" binding:"required"`
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,min=8,max=100"`
+}
 
 // LoginPayload login body
 type LoginPayload struct {
@@ -19,20 +24,27 @@ type LoginPayload struct {
 	Password string `json:"password" binding:"required"`
 }
 
-// LoginResponse token response
-type LoginResponse struct {
-	Token        string `json:"token"`
-	RefreshToken string `json:"refreshtoken"`
+type UserUpdatePayload struct {
+	FullName string `json:"fullName"`
+	Email    string `json:"email"`
 }
 
-// Signup handles new user registration
+// Signup handles new user registration.
 func (h *UserHandler) Signup(c *gin.Context) {
-	var user modeluser.User
-	if err := c.ShouldBindJSON(&user); err != nil {
+	var payload UserRegistration
+	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
-	if err := h.userService.CreateUser(&user); err != nil {
+
+	// Check if the email already exists
+	if h.userService.IsEmailExists(payload.Email) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already in use"})
+		return
+	}
+
+	// Assuming the default role is 'user'. Modify based on your application logic.
+	if err := h.userService.CreateUser(payload.FullName, payload.Email, payload.Password, modeluser.UserRole); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
@@ -40,66 +52,64 @@ func (h *UserHandler) Signup(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully"})
 }
 
-// Login handles user login
+// / Login handles user login.
 func (h *UserHandler) Login(c *gin.Context) {
 	var payload LoginPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Inputs"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid inputs"})
 		return
 	}
 
+	// Verify user's password.
+	authenticated, err := h.userService.VerifyUserPassword(payload.Email, payload.Password)
+	if err != nil || !authenticated {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+		return
+	}
+
+	// Retrieve user details for token generation.
 	user, err := h.userService.GetUserByEmail(payload.Email)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Email or Password"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve user data"})
 		return
 	}
 
-	if err := utils.CheckPassword(user.PasswordHash, user.Salt, payload.Password); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Email or Password"})
-		return
-	}
-
-	// Store the last login time before updating it
-	var lastLoginStr string
+	// Handle last login time.
+	lastLoginStr := "Never" // Default message for first-time login.
 	if user.LastLogin != nil {
 		lastLoginStr = user.LastLogin.Format(time.RFC3339)
 	}
 
-	// Update the last login time without affecting other fields
+	// Update last login time.
 	now := time.Now()
 	err = h.userService.UpdateLastLogin(user.ID, &now)
 	if err != nil {
-		log.Println(err)
-		c.JSON(500, gin.H{"error": "Failed to update last login time"})
-		return
+		log.Println("Failed to update last login time:", err)
 	}
 
+	// JWT token generation.
 	jwtWrapper := userauth.JwtWrapper{
-		SecretKey:         h.JWTKey,
-		Issuer:            "AuthService",
-		ExpirationMinutes: 30,
-		ExpirationHours:   12,
+		SecretKey:              h.JWTKey,
+		Issuer:                 "AuthService",
+		AccessTokenExpiration:  userauth.DefaultAccessTokenDuration,
+		RefreshTokenExpiration: userauth.DefaultRefreshTokenDuration,
 	}
-
-	// Generate JWT token with user's UUID and full name
 	signedToken, err := jwtWrapper.GenerateToken(user.ID.String(), user.FullName)
 	if err != nil {
-		log.Println(err)
-		c.JSON(500, gin.H{"Error": "Error Signing Token"})
-		c.Abort()
+		log.Println("Error signing token:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error signing token"})
 		return
 	}
 
-	// Generate refresh token with user's UUID and full name
+	// Generate refresh token.
 	signedRefreshToken, err := jwtWrapper.RefreshToken(user.ID.String(), user.FullName)
 	if err != nil {
-		log.Println(err)
-		c.JSON(500, gin.H{"Error": "Error Signing Refresh Token"})
-		c.Abort()
+		log.Println("Error signing refresh token:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error signing refresh token"})
 		return
 	}
 
-	// Set the refresh token in an HTTP-only cookie
+	// Set refresh token in an HTTP-only cookie.
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     "refreshToken",
 		Value:    signedRefreshToken,
@@ -107,106 +117,69 @@ func (h *UserHandler) Login(c *gin.Context) {
 		Path:     "/",
 		Secure:   true, // Set to true if using HTTPS
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(jwtWrapper.ExpirationHours * 3600),
+		MaxAge:   int(jwtWrapper.RefreshTokenExpiration.Seconds()),
 	})
 
-	// Return the access token and last login time in the JSON response
-	c.JSON(200, gin.H{
+	// Prepare and send the response.
+	response := gin.H{
 		"token":     signedToken,
 		"lastLogin": lastLoginStr,
-	})
+	}
+	c.JSON(http.StatusOK, response)
 }
 
-// Renew token from the refresh token
+// RenewAccessToken handles the renewal of the access token using the refresh token.
 func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 	refreshToken, err := c.Cookie("refreshToken")
 	if err != nil {
-		c.JSON(400, gin.H{
-			"Error": "Invalid Inputs",
-		})
-		c.Abort()
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Refresh token required"})
 		return
 	}
 
 	jwtWrapper := userauth.JwtWrapper{
-		SecretKey:         h.JWTKey,
-		Issuer:            "AuthService",
-		ExpirationMinutes: 30,
-		ExpirationHours:   12,
+		SecretKey:             h.JWTKey,
+		Issuer:                "AuthService",
+		AccessTokenExpiration: userauth.DefaultAccessTokenDuration,
 	}
 
 	claims, err := jwtWrapper.ValidateToken(refreshToken)
 	if err != nil {
-		c.JSON(401, gin.H{
-			"Error": "Invalid Token",
-		})
-		c.Abort()
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 		return
 	}
 
-	if claims.ExpiresAt < time.Now().UTC().Unix() {
-		c.JSON(401, gin.H{
-			"Error": "Token is expired",
-		})
-		c.Abort()
-		return
-	}
-
-	// Parse UUID from the claims
 	userID, err := uuid.Parse(claims.UserID)
 	if err != nil {
-		c.JSON(500, gin.H{
-			"Error": "Error parsing user ID",
-		})
-		c.Abort()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
 		return
 	}
 
-	isActive, err := h.userService.CheckLastLogin(userID)
-	if err != nil {
-		// Handle server errors separately
-		c.JSON(500, gin.H{"Error": "Server error checking user status"})
-		c.Abort()
-		return
-	}
-	if !isActive {
-		// User is not active, possibly due to being soft-deleted
-		c.JSON(401, gin.H{"Error": "Inactive account. Restore to continue."})
-		c.Abort()
+	// Check if the user's account is active
+	isSoftDeleted, err := h.userService.IsSoftDeleted(userID)
+	if err != nil || isSoftDeleted {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Account is not active. Please restore to continue."})
 		return
 	}
 
-	// Generate a new access token
 	newAccessToken, err := jwtWrapper.GenerateToken(claims.UserID, claims.FullName)
 	if err != nil {
-		log.Println(err)
-		c.JSON(500, gin.H{
-			"Error": "Error signing new token",
-		})
-		c.Abort()
+		log.Println("Error signing new token:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error signing new token"})
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"token": newAccessToken, // Return the new access token in the JSON response
-	})
+	c.JSON(http.StatusOK, gin.H{"token": newAccessToken})
 }
 
-// UpdateProfile handles updating user information
+// UpdateProfile handles updating user information.
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
-	var payload modeluser.UserUpdatePayload
+	var payload UserUpdatePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
 
-	userIDStr, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
-		return
-	}
-
-	userID, err := uuid.Parse(userIDStr.(string))
+	userID, err := getUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
 		return
@@ -218,20 +191,15 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
-	fmt.Println("email", user.Email, payload.Email)
 
 	// Check if the new email already exists for another user
-	if payload.Email != user.Email && h.userService.IsEmailExists(payload.Email, user.ID) {
+	if payload.Email != user.Email && h.userService.IsEmailExistsForOtherUser(payload.Email, userID) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Email already in use."})
 		return
 	}
 
 	// Update the user data with the payload
-	user.FullName = payload.FullName
-	user.Email = payload.Email
-
-	// Update the user in the database
-	if err := h.userService.UpdateUser(user, false); err != nil {
+	if err := h.userService.UpdateUser(userID, payload.FullName, payload.Email); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
 		return
 	}
@@ -241,19 +209,13 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 
 // DeleteProfile handles the soft deletion of a user profile
 func (h *UserHandler) DeleteProfile(c *gin.Context) {
-	userIDInterface, exists := c.Get("userID")
+	userIDStr, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
 		return
 	}
 
-	userIDStr, ok := userIDInterface.(string)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID is not valid"})
-		return
-	}
-
-	userID, err := uuid.Parse(userIDStr)
+	userID, err := uuid.Parse(userIDStr.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
 		return
@@ -281,19 +243,13 @@ func (h *UserHandler) DeleteProfile(c *gin.Context) {
 
 // RestoreProfile handles reactivating a soft-deleted user profile
 func (h *UserHandler) RestoreProfile(c *gin.Context) {
-	userIDInterface, exists := c.Get("userID")
+	userIDStr, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not provided"})
 		return
 	}
 
-	userIDStr, ok := userIDInterface.(string)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID is not valid"})
-		return
-	}
-
-	userID, err := uuid.Parse(userIDStr)
+	userID, err := uuid.Parse(userIDStr.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
 		return
@@ -319,17 +275,11 @@ func (h *UserHandler) RestoreProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Your account is restored successfully"})
 }
 
-// Profile retrieves the user's profile information
+// Profile retrieves the user's profile information.
 func (h *UserHandler) Profile(c *gin.Context) {
-	userIDStr, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
-		return
-	}
-
-	userID, err := uuid.Parse(userIDStr.(string))
+	userID, err := getUserIDFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
@@ -341,4 +291,13 @@ func (h *UserHandler) Profile(c *gin.Context) {
 
 	publicUser := user.ToPublicUser()
 	c.JSON(http.StatusOK, publicUser)
+}
+
+func getUserIDFromContext(c *gin.Context) (uuid.UUID, error) {
+	userIDStr, exists := c.Get("userID")
+	if !exists {
+		return uuid.Nil, errors.New("user ID not provided")
+	}
+
+	return uuid.Parse(userIDStr.(string))
 }
