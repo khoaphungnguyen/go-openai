@@ -1,5 +1,5 @@
-// chatmodel defines the data structures used in the chat application.
-package chatmodel
+// messagemodel defines the data structures used in the application.
+package messagemodel
 
 import (
 	"time"
@@ -13,7 +13,6 @@ type ChatMessage struct {
 	ThreadID  uuid.UUID `gorm:"type:uuid;index"`
 	UserID    uuid.UUID `gorm:"type:uuid"`
 	Role      string    `gorm:"type:varchar(50);not null"`
-	Model     string    `gorm:"type:varchar(255)"`
 	Content   string    `gorm:"type:text;not null"`
 	CreatedAt time.Time `gorm:"default:now()"`
 }

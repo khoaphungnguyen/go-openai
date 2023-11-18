@@ -1,4 +1,4 @@
-package usergin
+package usertransport
 
 import (
 	"errors"

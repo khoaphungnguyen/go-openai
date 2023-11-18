@@ -1,4 +1,4 @@
-package usergin
+package usertransport
 
 import businessuser "github.com/khoaphungnguyen/go-openai/internal/user/business"
 

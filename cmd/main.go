@@ -7,16 +7,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/sashabaranov/go-openai"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	chatbusiness "github.com/khoaphungnguyen/go-openai/internal/chat/business"
-	chatstorage "github.com/khoaphungnguyen/go-openai/internal/chat/storage"
-	chatgin "github.com/khoaphungnguyen/go-openai/internal/chat/transport/gin"
+	messagebusiness "github.com/khoaphungnguyen/go-openai/internal/message/business"
+	messagestorage "github.com/khoaphungnguyen/go-openai/internal/message/storage"
+	messagetransport "github.com/khoaphungnguyen/go-openai/internal/message/transport"
 	middleware "github.com/khoaphungnguyen/go-openai/internal/middlewares"
+	openaibusiness "github.com/khoaphungnguyen/go-openai/internal/openai/business"
+	openaistorage "github.com/khoaphungnguyen/go-openai/internal/openai/storage"
+	openaitransport "github.com/khoaphungnguyen/go-openai/internal/openai/transport"
 	userbusiness "github.com/khoaphungnguyen/go-openai/internal/user/business"
 	userstorage "github.com/khoaphungnguyen/go-openai/internal/user/storage"
-	usergin "github.com/khoaphungnguyen/go-openai/internal/user/transport/gin"
+	usertransport "github.com/khoaphungnguyen/go-openai/internal/user/transport"
 )
 
 func main() {
@@ -41,15 +45,26 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
+	// Initialize OpenAI client
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		log.Fatal("OPENAI_API_KEY environment variable not set")
+	}
+	openaiClient := openai.NewClient(apiKey)
+
 	// User and Chat service setup
 	userService := userbusiness.NewUserService(userstorage.NewUserStore(db))
-	userHandler := usergin.NewUserHandler(userService, jwtKey)
+	userHandler := usertransport.NewUserHandler(userService, jwtKey)
 
-	chatService := chatbusiness.NewChatService(chatstorage.NewChatStore(db))
-	chatHandler := chatgin.NewChatHandler(chatService)
+	messageService := messagebusiness.NewMessageService(messagestorage.NewMessageStore(db))
+	messageHandler := messagetransport.NewMessageHandler(messageService)
+
+	openaiService := openaibusiness.NewOpenAIService(openaistorage.NewOpenAIStore(db))
+	chatHandler := openaitransport.NewOpenAIHandler(openaiService)
 
 	router := gin.Default()
-	setupRoutes(router, userHandler, chatHandler, jwtKey)
+	router.Use(middleware.CORSMiddleware([]string{"http://localhost:3000"}))
+	setupRoutes(router, userHandler, messageHandler, chatHandler, jwtKey, openaiClient)
 
 	if err := router.Run(":8000"); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
@@ -57,7 +72,8 @@ func main() {
 }
 
 // setupRoutes defines the HTTP routes for the application.
-func setupRoutes(router *gin.Engine, userHandler *usergin.UserHandler, chatHandler *chatgin.ChatHandler, jwtKey string) {
+func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, messageHandler *messagetransport.MessageHandler,
+	openAIHandler *openaitransport.OpenAIHandler, jwtKey string, openaiClient *openai.Client) {
 	auth := router.Group("/auth")
 	{
 		auth.POST("/login", userHandler.Login)
@@ -72,12 +88,16 @@ func setupRoutes(router *gin.Engine, userHandler *usergin.UserHandler, chatHandl
 		protected.PUT("/profile/restore", userHandler.RestoreProfile)
 		protected.DELETE("/profile", userHandler.DeleteProfile)
 
-		// Chat routes under protected group
-		protected.POST("/thread", chatHandler.CreateThread)
-		protected.GET("/thread/:id", chatHandler.GetThreadByID)
-		protected.GET("/threads", chatHandler.GetAllThreads)
-		protected.DELETE("/thread/:id", chatHandler.DeleteThread)
-		protected.POST("/message", chatHandler.CreateMessage)
-		protected.GET("/threads/:threadID", chatHandler.GetMessagesByThreadID)
+		// ChatMessage routes under protected group
+		protected.POST("/thread", messageHandler.CreateThread)
+		protected.GET("/thread/:id", messageHandler.GetThreadByID)
+		protected.GET("/threads", messageHandler.GetAllThreads)
+		protected.DELETE("/thread/:id", messageHandler.DeleteThread)
+		protected.POST("/message", messageHandler.CreateMessage)
+		protected.GET("/threads/:threadID", messageHandler.GetMessagesByThreadID)
+
+		// Apply OpenAIClientMiddleware to the protected group that requires OpenAI client
+		protected.Use(middleware.OpenAIClientMiddleware(openaiClient))
+		protected.GET("/chat", openAIHandler.WebSocketHandler)
 	}
 }

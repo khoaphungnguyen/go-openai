@@ -1,4 +1,4 @@
-package chatgin
+package messagetransport
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	chatmodel "github.com/khoaphungnguyen/go-openai/internal/chat/model"
+	messagemodel "github.com/khoaphungnguyen/go-openai/internal/message/model"
 )
 
 type ThreadPayload struct {
@@ -27,13 +27,12 @@ type ChatMessageResponse struct {
 	ID        uuid.UUID `json:"id"`
 	ThreadID  uuid.UUID `json:"threadId"`
 	Role      string    `json:"role"`
-	Model     string    `json:"model"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
 // CreateThread handles the creation of a new chat thread.
-func (ch *ChatHandler) CreateThread(c *gin.Context) {
+func (mh *MessageHandler) CreateThread(c *gin.Context) {
 	var payload ThreadPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		respondWithError(c, http.StatusBadRequest, "Invalid request payload")
@@ -46,12 +45,12 @@ func (ch *ChatHandler) CreateThread(c *gin.Context) {
 		return
 	}
 
-	thread := &chatmodel.ChatThread{
+	thread := &messagemodel.ChatThread{
 		Title:  payload.Title,
 		UserID: userID,
 	}
 
-	if err := ch.chatService.CreateThread(thread); err != nil {
+	if err := mh.messsageService.CreateThread(thread); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to create thread")
 		return
 	}
@@ -60,14 +59,14 @@ func (ch *ChatHandler) CreateThread(c *gin.Context) {
 }
 
 // GetAllThreads handles the retrieval of all chat threads for a specific user.
-func (ch *ChatHandler) GetAllThreads(c *gin.Context) {
+func (mh *MessageHandler) GetAllThreads(c *gin.Context) {
 	userID, err := getUserIDFromContext(c)
 	if err != nil {
 		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	threads, err := ch.chatService.GetAllThreads(userID)
+	threads, err := mh.messsageService.GetAllThreads(userID)
 	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to retrieve threads")
 		return
@@ -82,7 +81,7 @@ func (ch *ChatHandler) GetAllThreads(c *gin.Context) {
 }
 
 // GetThreadByID handles retrieving a single chat thread by its ID.
-func (ch *ChatHandler) GetThreadByID(c *gin.Context) {
+func (mh *MessageHandler) GetThreadByID(c *gin.Context) {
 	userID, err := getUserIDFromContext(c)
 	if err != nil {
 		respondWithError(c, http.StatusBadRequest, err.Error())
@@ -95,7 +94,7 @@ func (ch *ChatHandler) GetThreadByID(c *gin.Context) {
 		return
 	}
 
-	thread, err := ch.chatService.GetThreadByID(threadID)
+	thread, err := mh.messsageService.GetThreadByID(threadID)
 	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Error retrieving thread")
 		return
@@ -117,21 +116,21 @@ func (ch *ChatHandler) GetThreadByID(c *gin.Context) {
 }
 
 // CreateMessage handles creating a new message in a chat thread.
-func (ch *ChatHandler) CreateMessage(c *gin.Context) {
+func (mh *MessageHandler) CreateMessage(c *gin.Context) {
 	userID, err := getUserIDFromContext(c)
 	if err != nil {
 		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	var message chatmodel.ChatMessage
+	var message messagemodel.ChatMessage
 	if err := c.ShouldBindJSON(&message); err != nil {
 		respondWithError(c, http.StatusBadRequest, "Invalid message format")
 		return
 	}
 
 	message.UserID = userID
-	if err := ch.chatService.CreateMessage(userID, &message); err != nil {
+	if err := mh.messsageService.CreateMessage(userID, &message); err != nil {
 		respondWithError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -140,7 +139,7 @@ func (ch *ChatHandler) CreateMessage(c *gin.Context) {
 }
 
 // GetMessagesByThreadID handles retrieving messages for a specific thread with pagination.
-func (ch *ChatHandler) GetMessagesByThreadID(c *gin.Context) {
+func (mh *MessageHandler) GetMessagesByThreadID(c *gin.Context) {
 	userID, err := getUserIDFromContext(c)
 	if err != nil {
 		respondWithError(c, http.StatusBadRequest, err.Error())
@@ -154,13 +153,13 @@ func (ch *ChatHandler) GetMessagesByThreadID(c *gin.Context) {
 	}
 
 	// Check if the user is authorized to access the thread
-	if !ch.chatService.IsUserThreadOwner(threadID, userID) {
+	if !mh.messsageService.IsUserThreadOwner(threadID, userID) {
 		respondWithError(c, http.StatusForbidden, "Unauthorized access to thread")
 		return
 	}
 
 	offset, limit := parseQueryInt(c, "offset", 0), parseQueryInt(c, "limit", 10)
-	messages, err := ch.chatService.GetMessagesByThreadID(threadID, offset, limit, userID)
+	messages, err := mh.messsageService.GetMessagesByThreadID(threadID, offset, limit, userID)
 	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to retrieve messages")
 		return
@@ -170,7 +169,7 @@ func (ch *ChatHandler) GetMessagesByThreadID(c *gin.Context) {
 }
 
 // DeleteThread handles the deletion of a chat thread.
-func (ch *ChatHandler) DeleteThread(c *gin.Context) {
+func (mh *MessageHandler) DeleteThread(c *gin.Context) {
 	userID, err := getUserIDFromContext(c)
 	if err != nil {
 		respondWithError(c, http.StatusBadRequest, err.Error())
@@ -183,7 +182,7 @@ func (ch *ChatHandler) DeleteThread(c *gin.Context) {
 		return
 	}
 
-	if err := ch.chatService.DeleteThread(threadID, userID); err != nil {
+	if err := mh.messsageService.DeleteThread(threadID, userID); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to delete thread")
 		return
 	}
@@ -214,7 +213,7 @@ func respondWithJSON(c *gin.Context, code int, payload interface{}) {
 	c.JSON(code, payload)
 }
 
-func convertToThreadResponse(thread *chatmodel.ChatThread) ThreadResponse {
+func convertToThreadResponse(thread *messagemodel.ChatThread) ThreadResponse {
 	return ThreadResponse{
 		ID:        thread.ID,
 		Title:     thread.Title,
@@ -224,7 +223,7 @@ func convertToThreadResponse(thread *chatmodel.ChatThread) ThreadResponse {
 }
 
 // convertToChatMessageResponse converts a ChatMessage model to a ChatMessageResponse for the API.
-func convertToChatMessageResponse(message *chatmodel.ChatMessage) ChatMessageResponse {
+func convertToChatMessageResponse(message *messagemodel.ChatMessage) ChatMessageResponse {
 	if message == nil {
 		return ChatMessageResponse{} // Return empty response for nil messages
 	}
@@ -233,7 +232,6 @@ func convertToChatMessageResponse(message *chatmodel.ChatMessage) ChatMessageRes
 		ID:        message.ID,
 		ThreadID:  message.ThreadID,
 		Role:      message.Role,
-		Model:     message.Model,
 		Content:   message.Content,
 		CreatedAt: message.CreatedAt,
 	}
