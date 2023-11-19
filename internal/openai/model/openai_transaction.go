@@ -26,8 +26,8 @@ func (OpenAITransaction) TableName() string {
 
 // OpenAITransactionInput represents the input data for creating a new OpenAI transaction.
 type OpenAITransactionInput struct {
-	UserID  string `json:"userID"`
-	Message string `json:"message"`
-	Model   string `json:"model"`
-	Role    string `json:"role"`
+	ThreadID string `json:"threadID"`
+	Message  string `json:"message"`
+	Model    string `json:"model"`
+	Role     string `json:"role"`
 }

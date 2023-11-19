@@ -2,23 +2,35 @@ package openaibusiness
 
 import (
 	"github.com/google/uuid"
+	messagemodel "github.com/khoaphungnguyen/go-openai/internal/message/model"
 	openaimodel "github.com/khoaphungnguyen/go-openai/internal/openai/model"
 )
 
-// ProcessNewTransaction handles the processing of a new OpenAI transaction.
-func (s *OpenAIService) CreateTransaction(userID uuid.UUID, inputData string, model string, role string) error {
-	// Simulate OpenAI API interaction and create a transaction record
-	transaction := &openaimodel.OpenAITransaction{
-		UserID: userID,
-		// Assume MessageID and ThreadID are set appropriately
-		Model:         model,
-		Role:          role,
-		MessageLength: len(inputData),
-		// ProcessTime is automatically set by GORM
-	}
+func (s *OpenAIService) CreateTransaction(userID, threadID uuid.UUID, message, model, role string) error {    
+    chatMessage := &messagemodel.ChatMessage{
+        ThreadID: threadID,
+        UserID:   userID,
+        Content: message,
+        Role:    role,
+    }
 
-	return s.openAIStore.CreateTransaction(transaction)
+    // Save the message using the message service
+    if err := s.messageService.CreateMessage(userID, chatMessage); err != nil {
+        return err
+    }
+
+    // Create and save the OpenAI transaction record
+    transaction := &openaimodel.OpenAITransaction{
+        UserID:        userID,
+        ThreadID:      threadID,
+        Model:         model,
+        Role:          role,
+        MessageLength: len(message),
+    }
+
+    return s.openAIStore.CreateTransaction(transaction)
 }
+
 
 // UpdateTransaction updates an existing OpenAI transaction.
 func (s *OpenAIService) UpdateTransaction(transaction *openaimodel.OpenAITransaction) error {

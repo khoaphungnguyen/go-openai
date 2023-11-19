@@ -59,7 +59,7 @@ func main() {
 	messageService := messagebusiness.NewMessageService(messagestorage.NewMessageStore(db))
 	messageHandler := messagetransport.NewMessageHandler(messageService)
 
-	openaiService := openaibusiness.NewOpenAIService(openaistorage.NewOpenAIStore(db))
+	openaiService := openaibusiness.NewOpenAIService(openaistorage.NewOpenAIStore(db), messageService)
 	chatHandler := openaitransport.NewOpenAIHandler(openaiService)
 
 	router := gin.Default()
