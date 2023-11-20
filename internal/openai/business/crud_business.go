@@ -6,31 +6,31 @@ import (
 	openaimodel "github.com/khoaphungnguyen/go-openai/internal/openai/model"
 )
 
-func (s *OpenAIService) CreateTransaction(userID, threadID uuid.UUID, message, model, role string) error {    
-    chatMessage := &messagemodel.ChatMessage{
-        ThreadID: threadID,
-        UserID:   userID,
-        Content: message,
-        Role:    role,
-    }
+func (s *OpenAIService) CreateTransaction(userID, threadID uuid.UUID, message, model, role string) error {
+	chatMessage := &messagemodel.ChatMessage{
+		ThreadID: threadID,
+		UserID:   userID,
+		Content:  message,
+		Role:     role,
+	}
 
-    // Save the message using the message service
-    if err := s.messageService.CreateMessage(userID, chatMessage); err != nil {
-        return err
-    }
+	// Save the message using the message service
+	if err := s.messageService.CreateMessage(userID, chatMessage); err != nil {
+		return err
+	}
 
-    // Create and save the OpenAI transaction record
-    transaction := &openaimodel.OpenAITransaction{
-        UserID:        userID,
-        ThreadID:      threadID,
-        Model:         model,
-        Role:          role,
-        MessageLength: len(message),
-    }
+	// Create and save the OpenAI transaction record
+	transaction := &openaimodel.OpenAITransaction{
+		UserID:        userID,
+		ThreadID:      threadID,
+		MessageID:     chatMessage.ID,
+		Model:         model,
+		Role:          role,
+		MessageLength: len(message),
+	}
 
-    return s.openAIStore.CreateTransaction(transaction)
+	return s.openAIStore.CreateTransaction(transaction)
 }
-
 
 // UpdateTransaction updates an existing OpenAI transaction.
 func (s *OpenAIService) UpdateTransaction(transaction *openaimodel.OpenAITransaction) error {

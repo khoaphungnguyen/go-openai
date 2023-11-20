@@ -25,6 +25,16 @@ CREATE TABLE chat_thread (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Chat Message Table
+CREATE TABLE chat_message (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  thread_id UUID REFERENCES chat_thread(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  role VARCHAR(50) NOT NULL CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- OpenAI Transacton Table
 CREATE TABLE openai_transaction (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -9,37 +9,39 @@ import (
 	openaimodel "github.com/khoaphungnguyen/go-openai/internal/openai/model"
 )
 
-// CreateTransaction handles the creation of a new OpenAI transaction.
+// CreateTransaction handles the creation of a new OpenAI transaction (HTTP Handler).
 func (h *OpenAIHandler) CreateTransaction(c *gin.Context) {
-	// Extract userID from Gin context
 	userID, err := common.GetUserIDFromContext(c)
 	if err != nil {
 		common.RespondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Bind input data from request
 	var inputData openaimodel.OpenAITransactionInput
 	if err := c.ShouldBindJSON(&inputData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
 		return
 	}
 
-	// Parse ThreadID from the input data
-	threadID, err := uuid.Parse(inputData.ThreadID)
+	err = h.createTransaction(userID, inputData)
 	if err != nil {
-		common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
-		return
-	}
-
-	// Create a new transaction using the business service
-	err = h.openAIService.CreateTransaction(userID, threadID, inputData.Message, inputData.Model, inputData.Role)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create transaction"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Transaction created"})
+}
+
+
+
+// Core logic for creating a transaction
+func (h *OpenAIHandler) createTransaction(userID uuid.UUID, inputData openaimodel.OpenAITransactionInput) error {
+	threadID, err := uuid.Parse(inputData.ThreadID)
+	if err != nil {
+		return err
+	}
+
+	return h.openAIService.CreateTransaction(userID, threadID, inputData.Message, inputData.Model, inputData.Role)
 }
 
 // GetTransactionsByUserID handles fetching transactions for a specific user.

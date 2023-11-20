@@ -1,3 +1,7 @@
+-- Drop table OpenAI transaction
+DROP TABLE IF EXISTS "openai_transaction";
+
+
 -- Drop table Chat Message
 DROP TABLE IF EXISTS "chat_message";
 
