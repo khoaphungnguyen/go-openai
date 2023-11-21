@@ -1,12 +1,18 @@
 package openaitransport
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/khoaphungnguyen/go-openai/internal/common"
 	openaimodel "github.com/khoaphungnguyen/go-openai/internal/openai/model"
+	"github.com/sashabaranov/go-openai"
 )
 
 // CreateTransaction handles the creation of a new OpenAI transaction (HTTP Handler).
@@ -31,8 +37,6 @@ func (h *OpenAIHandler) CreateTransaction(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Transaction created"})
 }
-
-
 
 // Core logic for creating a transaction
 func (h *OpenAIHandler) createTransaction(userID uuid.UUID, inputData openaimodel.OpenAITransactionInput) error {
@@ -109,3 +113,107 @@ func (h *OpenAIHandler) GetTransactionByID(c *gin.Context) {
 
 	c.JSON(http.StatusOK, transaction)
 }
+
+func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
+	userID, err := common.GetUserIDFromContext(c)
+	if err != nil {
+		common.RespondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	threadID, err := uuid.Parse(c.Param("threadID"))
+	if err != nil {
+		common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
+		return
+	}
+
+	openaiClient, exists := c.MustGet("openaiClient").(*openai.Client)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "OpenAI client not available"})
+		return
+	}
+
+	var inputData openaimodel.OpenAITransactionInput
+	if err := c.ShouldBindJSON(&inputData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
+		return
+	}
+
+	// Log the user's message
+	err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+		ThreadID: threadID.String(),
+		Message:  string(inputData.Message),
+		Model:    inputData.Model,
+		Role:     "user",
+	})
+	if err != nil {
+		log.Printf("Error saving user transaction: %v", err)
+		return
+	}
+
+	// Set up the chat completion request using the OpenAI client
+	req := openai.ChatCompletionRequest{
+		Model:     "gpt-3.5-turbo-1106",
+		MaxTokens: 100,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    "user",
+				Content: inputData.Message,
+			},
+		},
+	}
+
+	stream, err := openaiClient.CreateChatCompletionStream(context.Background(), req)
+	if err != nil {
+		log.Printf("CreateChatCompletionStream error: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create stream"})
+		return
+	}
+
+	var responseBuilder strings.Builder
+	// Stream the response from OpenAI
+	for {
+		response, err := stream.Recv()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			log.Printf("Stream error: %v\n", err)
+			break
+		}
+		responseContent := response.Choices[0].Delta.Content
+		responseBuilder.WriteString(responseContent)
+	}
+	stream.Close()
+
+	aiResponse := responseBuilder.String()
+
+	// Log AI response as a transaction
+
+	aiResponseQueue <- aiResponse // Send AI response to the SSE queue
+	c.JSON(http.StatusOK, gin.H{"message": "Message received and processed"})
+}
+
+var aiResponseQueue = make(chan string, 200)
+
+func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
+    c.Writer.Header().Set("Content-Type", "text/event-stream")
+    c.Writer.Header().Set("Cache-Control", "no-cache")
+    c.Writer.Header().Set("Connection", "keep-alive")
+    c.Writer.Header().Set("Transfer-Encoding", "chunked")
+
+    flusher, ok := c.Writer.(http.Flusher)
+    if !ok {
+        common.RespondWithError(c, http.StatusInternalServerError, "Streaming not supported")
+        return
+    }
+
+    for {
+        select {
+        case response := <-aiResponseQueue:
+            fmt.Fprintf(c.Writer, "data: %s\n\n", response)
+            flusher.Flush()
+        case <-c.Request.Context().Done():
+            return
+        }
+    }
+}
+

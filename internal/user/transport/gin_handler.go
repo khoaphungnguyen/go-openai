@@ -115,15 +115,15 @@ func (h *UserHandler) Login(c *gin.Context) {
 		Value:    signedRefreshToken,
 		HttpOnly: true,
 		Path:     "/",
-		Secure:   true, // Set to true if using HTTPS
+		Secure:   false, // Set to true if using HTTPS
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(jwtWrapper.RefreshTokenExpiration.Seconds()),
 	})
 
 	// Prepare and send the response.
 	response := gin.H{
-		"token":     signedToken,
-		"lastLogin": lastLoginStr,
+		"accessToken": signedToken,
+		"lastLogin":   lastLoginStr,
 	}
 	c.JSON(http.StatusOK, response)
 }

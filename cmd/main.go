@@ -74,6 +74,7 @@ func main() {
 // setupRoutes defines the HTTP routes for the application.
 func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, messageHandler *messagetransport.MessageHandler,
 	openAIHandler *openaitransport.OpenAIHandler, jwtKey string, openaiClient *openai.Client) {
+
 	auth := router.Group("/auth")
 	{
 		auth.POST("/login", userHandler.Login)
@@ -104,5 +105,7 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 		protected.DELETE("/transactions/:transactionID", openAIHandler.DeleteTransaction)
 		protected.GET("/transactions/:transactionID", openAIHandler.GetTransactionByID)
 		protected.GET("/chat/:threadID", openAIHandler.WebSocketHandler)
+		protected.GET("/chat/stream/:threadID", openAIHandler.SSEHandler)
+		protected.POST("/chat/post/:threadID", openAIHandler.MessageHanlder)
 	}
 }
