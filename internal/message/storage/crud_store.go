@@ -29,7 +29,7 @@ func (ms *messageStore) GetThreadByID(threadID uuid.UUID) (*messagemodel.ChatThr
 // GetThreadsByUserID retrieves all chat threads for a specific user
 func (ms *messageStore) GetThreadsByUserID(userID uuid.UUID, limit, offset int) ([]messagemodel.ChatThread, error) {
 	var threads []messagemodel.ChatThread
-	err := ms.db.Where("user_id = ?", userID).Limit(limit).Offset(offset).Find(&threads).Error
+	err := ms.db.Where("user_id = ?", userID).Order("updated_at DESC").Limit(limit).Offset(offset).Find(&threads).Error
 	return threads, err
 }
 

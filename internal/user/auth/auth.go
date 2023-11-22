@@ -9,13 +9,13 @@ import (
 
 const (
 	// Define the default expiration times for tokens.
-	DefaultAccessTokenDuration  = 15 * time.Minute
+	DefaultAccessTokenDuration  = 120 * time.Minute
 	DefaultRefreshTokenDuration = 7 * 24 * time.Hour
 )
 
 type JwtWrapper struct {
-	SecretKey        string        // Key used for signing the JWT token
-	Issuer           string        // Issuer of the JWT token
+	SecretKey              string        // Key used for signing the JWT token
+	Issuer                 string        // Issuer of the JWT token
 	AccessTokenExpiration  time.Duration // Expiration time of the JWT token
 	RefreshTokenExpiration time.Duration // Expiration time of the Refresh token
 }

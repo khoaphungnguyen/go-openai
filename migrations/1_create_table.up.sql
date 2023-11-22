@@ -46,3 +46,24 @@ CREATE TABLE openai_transaction (
   message_length INT,  -- Tracks the length of the user's message
   process_time TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Create or replace the trigger function to update the chat_thread
+CREATE OR REPLACE FUNCTION update_thread_on_new_message()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Update the updated_at field and set the title to the first 40 characters of the new message content
+    UPDATE chat_thread
+    SET 
+        updated_at = NOW(),
+        title = LEFT(NEW.content, 40)  -- Truncate content to 40 characters
+    WHERE id = NEW.thread_id;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- The trigger itself remains the same
+CREATE TRIGGER trigger_update_thread_on_new_message
+AFTER INSERT ON chat_message
+FOR EACH ROW
+EXECUTE FUNCTION update_thread_on_new_message();
+
