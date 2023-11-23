@@ -60,9 +60,7 @@ func (ms *MessageService) GetMessagesByThreadID(threadID uuid.UUID, limit, offse
 	if threadID == uuid.Nil {
 		return nil, errors.New("invalid thread ID")
 	}
-	if !ms.messageStore.IsUserThreadOwner(threadID, userID) {
-		return nil, errors.New("unauthorized access to thread")
-	}
+	
 	return ms.messageStore.GetMessagesByThreadID(threadID, limit, offset)
 }
 

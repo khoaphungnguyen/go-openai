@@ -36,7 +36,6 @@ func (h *UserHandler) Signup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
-
 	// Check if the email already exists
 	if h.userService.IsEmailExists(payload.Email) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already in use"})
@@ -48,7 +47,6 @@ func (h *UserHandler) Signup(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
-
 	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully"})
 }
 

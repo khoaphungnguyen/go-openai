@@ -95,7 +95,7 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 		protected.GET("/threads", messageHandler.GetAllThreads)
 		protected.DELETE("/thread/:id", messageHandler.DeleteThread)
 		protected.POST("/message", messageHandler.CreateMessage)
-		protected.GET("/threads/:threadID ", messageHandler.GetMessagesByThreadID)
+		protected.GET("/threads/:threadID", messageHandler.GetMessagesByThreadID)
 
 		// Apply OpenAIClientMiddleware to the protected group that requires OpenAI client
 		protected.Use(middleware.OpenAIClientMiddleware(openaiClient))
@@ -106,6 +106,7 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 		protected.GET("/transactions/:transactionID", openAIHandler.GetTransactionByID)
 		protected.GET("/chat/:threadID", openAIHandler.WebSocketHandler)
 		protected.GET("/chat/stream/:threadID", openAIHandler.SSEHandler)
-		protected.POST("/chat/post/:threadID", openAIHandler.MessageHanlder)
+		protected.POST("/chat/ask/:threadID", openAIHandler.MessageHanlder)
 	}
 }
+

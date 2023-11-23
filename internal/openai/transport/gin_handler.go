@@ -120,6 +120,7 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		common.RespondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	threadID, err := uuid.Parse(c.Param("threadID"))
 	if err != nil {
 		common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
@@ -137,7 +138,6 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
 		return
 	}
-
 	// Log the user's message
 	err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
 		ThreadID: threadID.String(),
@@ -149,10 +149,9 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		log.Printf("Error saving user transaction: %v", err)
 		return
 	}
-
 	// Set up the chat completion request using the OpenAI client
 	req := openai.ChatCompletionRequest{
-		Model:     "gpt-3.5-turbo-1106",
+		Model:     inputData.Model,
 		MaxTokens: 100,
 		Messages: []openai.ChatCompletionMessage{
 			{
@@ -161,7 +160,7 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 			},
 		},
 	}
-
+	fmt.Println("Got here. AI...1")
 	stream, err := openaiClient.CreateChatCompletionStream(context.Background(), req)
 	if err != nil {
 		log.Printf("CreateChatCompletionStream error: %v\n", err)
@@ -187,7 +186,16 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	aiResponse := responseBuilder.String()
 
 	// Log AI response as a transaction
-
+	err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+		ThreadID: threadID.String(),
+		Message:  responseBuilder.String(),
+		Model:    inputData.Model,
+		Role:     "assistant",
+	})
+	if err != nil {
+		log.Printf("Error saving user transaction: %v", err)
+		return
+	}
 	aiResponseQueue <- aiResponse // Send AI response to the SSE queue
 	c.JSON(http.StatusOK, gin.H{"message": "Message received and processed"})
 }
@@ -195,25 +203,31 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 var aiResponseQueue = make(chan string, 200)
 
 func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
-    c.Writer.Header().Set("Content-Type", "text/event-stream")
-    c.Writer.Header().Set("Cache-Control", "no-cache")
-    c.Writer.Header().Set("Connection", "keep-alive")
-    c.Writer.Header().Set("Transfer-Encoding", "chunked")
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("Transfer-Encoding", "chunked")
 
-    flusher, ok := c.Writer.(http.Flusher)
-    if !ok {
-        common.RespondWithError(c, http.StatusInternalServerError, "Streaming not supported")
-        return
-    }
+	fmt.Println("SSE begin...")
 
-    for {
-        select {
-        case response := <-aiResponseQueue:
-            fmt.Fprintf(c.Writer, "data: %s\n\n", response)
-            flusher.Flush()
-        case <-c.Request.Context().Done():
-            return
-        }
-    }
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		common.RespondWithError(c, http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+	fmt.Println("SSE", aiResponseQueue)
+	for {
+		select {
+		case response := <-aiResponseQueue:
+			// Create a JSON object that includes both the content and the role.
+			// You may need to adjust this depending on how your data is structured.
+			fmt.Println("response", response)
+			jsonResponse := fmt.Sprintf(`{"Content": %q, "Role": "assistant"}`, response)
+			fmt.Fprintf(c.Writer, "data: %s\n\n", jsonResponse)
+			flusher.Flush()
+		case <-c.Request.Context().Done():
+			return
+
+		}
+	}
 }
-

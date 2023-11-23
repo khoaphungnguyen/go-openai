@@ -158,13 +158,12 @@ func (mh *MessageHandler) GetMessagesByThreadID(c *gin.Context) {
 		return
 	}
 
-	offset, limit := parseQueryInt(c, "offset", 0), parseQueryInt(c, "limit", 10)
+	offset, limit := parseQueryInt(c, "offset", 0), parseQueryInt(c, "limit", 100)
 	messages, err := mh.messsageService.GetMessagesByThreadID(threadID, offset, limit, userID)
 	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to retrieve messages")
 		return
 	}
-
 	respondWithJSON(c, http.StatusOK, messages)
 }
 
