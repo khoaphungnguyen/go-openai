@@ -227,7 +227,63 @@ func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
 			flusher.Flush()
 		case <-c.Request.Context().Done():
 			return
-
 		}
 	}
+}
+
+// FetchSuggestion handles the request to fetch suggestions from OpenAI.
+func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
+	// Extract user ID from context, if required
+	_, err := common.GetUserIDFromContext(c)
+	if err != nil {
+		common.RespondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Retrieve the OpenAI client from the context
+	openaiClient, exists := c.MustGet("openaiClient").(*openai.Client)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "OpenAI client not available"})
+		return
+	}
+	type RequestData struct {
+		Model string `json:"model"`
+	}
+
+	// Bind the input data (assumed to be the model name)
+	var requestData RequestData
+	if err := c.ShouldBindJSON(&requestData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
+		return
+	}
+
+	// Construct the prompt
+	prompt := `Provide four engaging recommendations (max 10 words each) as JSON: [{ "title": "", "content": "" }, ...]`
+
+	// Create the request payload and send the request to OpenAI
+	resp, err := openaiClient.CreateChatCompletion(
+		context.Background(),
+		openai.ChatCompletionRequest{
+			Model:            requestData.Model,
+			Messages:         []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
+			Temperature:      0.7,
+			TopP:             1,
+			FrequencyPenalty: 0,
+			PresencePenalty:  0,
+			MaxTokens:        1000,
+			N:                1,
+			Stream:           false,
+		},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
+		return
+	}
+
+	// Check if the response has content and return the content
+	if len(resp.Choices) > 0 && len(resp.Choices[0].Message.Content) > 0 {
+		c.JSON(http.StatusOK, resp.Choices[0].Message.Content)
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
 }

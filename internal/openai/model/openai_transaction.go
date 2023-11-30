@@ -31,3 +31,27 @@ type OpenAITransactionInput struct {
 	Model    string `json:"model"`
 	Role     string `json:"role"`
 }
+
+type ChatCompletionRequest struct {
+    Model             string      `json:"model"`
+    Messages          []Message   `json:"messages"`
+    Temperature       float64     `json:"temperature"`
+    TopP              float64     `json:"top_p"`
+    FrequencyPenalty  float64     `json:"frequency_penalty"`
+    PresencePenalty   float64     `json:"presence_penalty"`
+    MaxTokens         int         `json:"max_tokens"`
+    N                 int         `json:"n"`
+}
+
+type Message struct {
+    Role    string `json:"role"`
+    Content string `json:"content"`
+}
+
+type ChatCompletionResponse struct {
+    Choices []struct {
+        Message struct {
+            Content string `json:"content"`
+        } `json:"message"`
+    } `json:"choices"`
+}
