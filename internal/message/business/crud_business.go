@@ -56,12 +56,24 @@ func (ms *MessageService) GetAllThreads(userID uuid.UUID) ([]messagemodel.ChatTh
 }
 
 // GetMessagesByThreadID retrieves messages of a chat thread with pagination.
-func (ms *MessageService) GetMessagesByThreadID(threadID uuid.UUID, limit, offset int, userID uuid.UUID) ([]messagemodel.ChatMessage, error) {
+func (ms *MessageService) GetMessagesByThreadID(threadID uuid.UUID, limit, offset int, userID uuid.UUID) ([]messagemodel.ChatMessageResponse, error) {
 	if threadID == uuid.Nil {
 		return nil, errors.New("invalid thread ID")
 	}
-	
-	return ms.messageStore.GetMessagesByThreadID(threadID, limit, offset)
+	messages, err := ms.messageStore.GetMessagesByThreadID(threadID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	var responseMessages []messagemodel.ChatMessageResponse
+	for _, msg := range messages {
+		responseMessage := messagemodel.ChatMessageResponse{
+			Content:   msg.Content,
+			Role:      msg.Role,
+			CreatedAt: msg.CreatedAt,
+		}
+		responseMessages = append(responseMessages, responseMessage)
+	}
+	return responseMessages, nil
 }
 
 // DeleteThread deletes a chat thread.

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -114,6 +115,11 @@ func (h *OpenAIHandler) GetTransactionByID(c *gin.Context) {
 	c.JSON(http.StatusOK, transaction)
 }
 
+// Define a map to hold channels for each thread
+var threadSSEChannels = make(map[uuid.UUID]chan string)
+
+var mutex = &sync.Mutex{}
+
 func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	userID, err := common.GetUserIDFromContext(c)
 	if err != nil {
@@ -152,7 +158,8 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	// Set up the chat completion request using the OpenAI client
 	req := openai.ChatCompletionRequest{
 		Model:     inputData.Model,
-		MaxTokens: 100,
+		Stream:    true,
+		MaxTokens: 1000,
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
@@ -160,16 +167,16 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 			},
 		},
 	}
-	fmt.Println("Got here. AI...1")
 	stream, err := openaiClient.CreateChatCompletionStream(context.Background(), req)
 	if err != nil {
 		log.Printf("CreateChatCompletionStream error: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create stream"})
 		return
 	}
+	defer stream.Close()
 
 	var responseBuilder strings.Builder
-	// Stream the response from OpenAI
+	// Stream the response from OpenAI and send parts to the client via SSE
 	for {
 		response, err := stream.Recv()
 		if err == io.EOF {
@@ -180,10 +187,13 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		}
 		responseContent := response.Choices[0].Delta.Content
 		responseBuilder.WriteString(responseContent)
+		// Send each part of the response to the SSE channel
+		mutex.Lock()
+		if ch, exists := threadSSEChannels[threadID]; exists {
+			ch <- responseContent
+		}
+		mutex.Unlock()
 	}
-	stream.Close()
-
-	aiResponse := responseBuilder.String()
 
 	// Log AI response as a transaction
 	err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
@@ -196,36 +206,50 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		log.Printf("Error saving user transaction: %v", err)
 		return
 	}
-	aiResponseQueue <- aiResponse // Send AI response to the SSE queue
+
 	c.JSON(http.StatusOK, gin.H{"message": "Message received and processed"})
 }
 
-var aiResponseQueue = make(chan string, 200)
-
 func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
+	threadID, err := uuid.Parse(c.Param("threadID"))
+	if err != nil {
+		common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
+		return
+	}
+	// Initialize a channel for the thread if it doesn't exist
+	mutex.Lock()
+	if _, exists := threadSSEChannels[threadID]; !exists {
+		threadSSEChannels[threadID] = make(chan string, 50) // Adjust buffer size as needed
+	}
+	ch := threadSSEChannels[threadID]
+	mutex.Unlock()
+
+	// Set SSE Headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("Transfer-Encoding", "chunked")
-
-	fmt.Println("SSE begin...")
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		common.RespondWithError(c, http.StatusInternalServerError, "Streaming not supported")
 		return
 	}
-	fmt.Println("SSE", aiResponseQueue)
+
+	// Stream messages for the specific thread
 	for {
 		select {
-		case response := <-aiResponseQueue:
-			// Create a JSON object that includes both the content and the role.
-			// You may need to adjust this depending on how your data is structured.
-			fmt.Println("response", response)
+		case response := <-ch:
 			jsonResponse := fmt.Sprintf(`{"Content": %q, "Role": "assistant"}`, response)
 			fmt.Fprintf(c.Writer, "data: %s\n\n", jsonResponse)
 			flusher.Flush()
+
 		case <-c.Request.Context().Done():
+			// Cleanup when client disconnects
+			mutex.Lock()
+			close(ch)
+			delete(threadSSEChannels, threadID)
+			mutex.Unlock()
 			return
 		}
 	}

@@ -35,3 +35,9 @@ type ChatThread struct {
 func (ChatThread) TableName() string {
 	return "chat_thread"
 }
+
+type ChatMessageResponse struct {
+    Content   string    `json:"content"`
+    Role      string    `json:"role"`
+    CreatedAt time.Time `json:"createdAt"`
+}
