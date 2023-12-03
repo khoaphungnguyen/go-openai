@@ -67,6 +67,7 @@ func (ms *MessageService) GetMessagesByThreadID(threadID uuid.UUID, limit, offse
 	var responseMessages []messagemodel.ChatMessageResponse
 	for _, msg := range messages {
 		responseMessage := messagemodel.ChatMessageResponse{
+			ID : msg.ID,
 			Content:   msg.Content,
 			Role:      msg.Role,
 			CreatedAt: msg.CreatedAt,

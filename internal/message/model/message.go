@@ -37,6 +37,7 @@ func (ChatThread) TableName() string {
 }
 
 type ChatMessageResponse struct {
+	ID        uuid.UUID `json:"id"`  
     Content   string    `json:"content"`
     Role      string    `json:"role"`
     CreatedAt time.Time `json:"createdAt"`
