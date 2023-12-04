@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -240,7 +241,11 @@ func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
 	for {
 		select {
 		case response := <-ch:
-			jsonResponse := fmt.Sprintf(`{"Content": %q, "Role": "assistant"}`, response)
+			messageID := uuid.New().String()             // Generate a unique ID for the message
+			createdAt := time.Now().Format(time.RFC3339) // Format the current time
+
+			// Create a JSON response with the message ID and timestamp
+			jsonResponse := fmt.Sprintf(`{"id": %q, "content": %q, "role": "assistant", "createdAt": %q}`, messageID, response, createdAt)
 			fmt.Fprintf(c.Writer, "data: %s\n\n", jsonResponse)
 			flusher.Flush()
 
