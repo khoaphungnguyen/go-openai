@@ -173,13 +173,14 @@ func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
 }
 
-
 // Define a map to hold channels and a corresponding closed state for each thread
 var (
 	threadSSEChannels = make(map[uuid.UUID]chan string)
 	threadSSEClosed   = make(map[uuid.UUID]bool)
+	threadSequenceNumbers = make(map[uuid.UUID]int64)
 	mutex             = &sync.RWMutex{}
 )
+
 
 func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	userID, err := common.GetUserIDFromContext(c)
@@ -279,73 +280,85 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Message received and processed"})
 }
-
 func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
-	threadID, err := uuid.Parse(c.Param("threadID"))
-	if err != nil {
-		common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
-		return
-	}
+    threadID, err := uuid.Parse(c.Param("threadID"))
+    if err != nil {
+        common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
+        return
+    }
 
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("Transfer-Encoding", "chunked")
+    c.Writer.Header().Set("Content-Type", "text/event-stream")
+    c.Writer.Header().Set("Cache-Control", "no-cache")
+    c.Writer.Header().Set("Connection", "keep-alive")
+    c.Writer.Header().Set("Transfer-Encoding", "chunked")
 
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		common.RespondWithError(c, http.StatusInternalServerError, "Streaming not supported")
-		return
-	}
+    flusher, ok := c.Writer.(http.Flusher)
+    if !ok {
+        common.RespondWithError(c, http.StatusInternalServerError, "Streaming not supported")
+        return
+    }
 
-	// Create a new channel for the threadID if it does not exist or use the existing one.
-	mutex.Lock()
-	ch, exists := threadSSEChannels[threadID]
-	if !exists {
-		ch = make(chan string, 100)
-		threadSSEChannels[threadID] = ch
-		threadSSEClosed[threadID] = false
-	}
-	mutex.Unlock()
+     // Lock the mutex to safely access the maps
+	 mutex.Lock()
+	 ch, exists := threadSSEChannels[threadID]
+	 sequenceNumber, seqExists := threadSequenceNumbers[threadID]
+	 if !exists {
+		 ch = make(chan string, 100) // Buffer of 100 messages
+		 threadSSEChannels[threadID] = ch
+		 threadSSEClosed[threadID] = false
+	 }
+	 if !seqExists {
+		 // Initialize sequence number for new channel
+		 threadSequenceNumbers[threadID] = 0
+	 }
+	 mutex.Unlock()
 
-	// Clean up routine to handle closing the channel and removing from the map.
-	defer func() {
-		mutex.Lock()
-		if !threadSSEClosed[threadID] {
-			close(ch)
-			threadSSEClosed[threadID] = true
-			delete(threadSSEChannels, threadID)
-		}
-		mutex.Unlock()
-	}()
+    defer func() {
+        mutex.Lock()
+        close(ch)
+        delete(threadSSEChannels, threadID)
+        delete(threadSequenceNumbers, threadID)
+        threadSSEClosed[threadID] = true
+        mutex.Unlock()
+    }()
 
-	// Handle client-side disconnection.
-	notify := c.Request.Context().Done()
-	go func() {
-		<-notify
-		mutex.Lock()
-		if !threadSSEClosed[threadID] {
-			close(ch)
-			threadSSEClosed[threadID] = true
-			delete(threadSSEChannels, threadID)
-		}
-		mutex.Unlock()
-	}()
+    notify := c.Request.Context().Done()
+    go func() {
+        <-notify
+        mutex.Lock()
+        if !threadSSEClosed[threadID] {
+            close(ch)
+            delete(threadSSEChannels, threadID)
+            delete(threadSequenceNumbers, threadID)
+            threadSSEClosed[threadID] = true
+        }
+        mutex.Unlock()
+        log.Printf("SSE stream for thread ID %s closed\n", threadID)
+    }()
 
-	// Stream messages for the specific thread.
-	for {
-		select {
-		case response, ok := <-ch:
-			if !ok {
-				return // Channel was closed, exit the handler.
-			}
-			messageID := uuid.New().String()
-			createdAt := time.Now().Format(time.RFC3339)
-			jsonResponse := fmt.Sprintf(`{"id": %q, "content": %q, "role": "assistant", "createdAt": %q}`, messageID, response, createdAt)
-			fmt.Fprintf(c.Writer, "data: %s\n\n", jsonResponse)
-			flusher.Flush()
-		case <-notify:
-			return // Exit the handler when we're done.
-		}
-	}
+    for {
+        select {
+        case response, ok := <-ch:
+            if !ok {
+                log.Printf("Channel for thread ID %s has been closed", threadID)
+                return // Channel was closed, exit the handler.
+            }
+            messageID := uuid.New().String()
+            createdAt := time.Now().Format(time.RFC3339)
+
+            mutex.Lock()
+            sequenceNumber++
+            threadSequenceNumbers[threadID] = sequenceNumber
+            mutex.Unlock()
+
+            jsonResponse := fmt.Sprintf(`{"id": %q, "sequence": %d, "content": %q, "role": "assistant", "createdAt": %q}`, messageID, sequenceNumber, response, createdAt)
+
+            fmt.Fprintf(c.Writer, "data: %s\n\n", jsonResponse)
+            flusher.Flush()
+            log.Printf("Sent message with sequence %d for thread ID %s", sequenceNumber, threadID)
+        case <-notify:
+            log.Printf("Received notification to close SSE stream for thread ID %s", threadID)
+            return // Exit the handler when we're done.
+        }
+    }
 }
