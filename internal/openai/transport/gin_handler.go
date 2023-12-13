@@ -116,10 +116,70 @@ func (h *OpenAIHandler) GetTransactionByID(c *gin.Context) {
 	c.JSON(http.StatusOK, transaction)
 }
 
-// Define a map to hold channels for each thread
-var threadSSEChannels = make(map[uuid.UUID]chan string)
+// FetchSuggestion handles the request to fetch suggestions from OpenAI.
+func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
+	// Extract user ID from context, if required
+	_, err := common.GetUserIDFromContext(c)
+	if err != nil {
+		common.RespondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
-var mutex = &sync.Mutex{}
+	// Retrieve the OpenAI client from the context
+	openaiClient, exists := c.MustGet("openaiClient").(*openai.Client)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "OpenAI client not available"})
+		return
+	}
+	type RequestData struct {
+		Model string `json:"model"`
+	}
+
+	// Bind the input data (assumed to be the model name)
+	var requestData RequestData
+	if err := c.ShouldBindJSON(&requestData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
+		return
+	}
+
+	// Construct the prompt
+	prompt := `Provide four engaging recommendations (max 10 words each) as JSON: [{ "title": "", "content": "" }, ...]`
+
+	// Create the request payload and send the request to OpenAI
+	resp, err := openaiClient.CreateChatCompletion(
+		context.Background(),
+		openai.ChatCompletionRequest{
+			Model:            requestData.Model,
+			Messages:         []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
+			Temperature:      0.7,
+			TopP:             1,
+			FrequencyPenalty: 0,
+			PresencePenalty:  0,
+			MaxTokens:        1000,
+			N:                1,
+			Stream:           false,
+		},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
+		return
+	}
+
+	// Check if the response has content and return the content
+	if len(resp.Choices) > 0 && len(resp.Choices[0].Message.Content) > 0 {
+		c.JSON(http.StatusOK, resp.Choices[0].Message.Content)
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
+}
+
+
+// Define a map to hold channels and a corresponding closed state for each thread
+var (
+	threadSSEChannels = make(map[uuid.UUID]chan string)
+	threadSSEClosed   = make(map[uuid.UUID]bool)
+	mutex             = &sync.RWMutex{}
+)
 
 func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	userID, err := common.GetUserIDFromContext(c)
@@ -177,6 +237,16 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	defer stream.Close()
 
 	var responseBuilder strings.Builder
+
+	mutex.RLock()
+	ch, exists := threadSSEChannels[threadID]
+	mutex.RUnlock()
+
+	if !exists {
+		log.Printf("No channel found for thread ID %s, skipping message send.", threadID)
+		return
+	}
+
 	// Stream the response from OpenAI and send parts to the client via SSE
 	for {
 		response, err := stream.Recv()
@@ -188,12 +258,11 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		}
 		responseContent := response.Choices[0].Delta.Content
 		responseBuilder.WriteString(responseContent)
-		// Send each part of the response to the SSE channel
-		mutex.Lock()
-		if ch, exists := threadSSEChannels[threadID]; exists {
-			ch <- responseContent
+		select {
+		case ch <- responseContent:
+		default:
+			log.Printf("Channel buffer full or closed. Dropping message for thread ID %s.", threadID)
 		}
-		mutex.Unlock()
 	}
 
 	// Log AI response as a transaction
@@ -217,15 +286,7 @@ func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
 		common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
 		return
 	}
-	// Initialize a channel for the thread if it doesn't exist
-	mutex.Lock()
-	if _, exists := threadSSEChannels[threadID]; !exists {
-		threadSSEChannels[threadID] = make(chan string, 50) // Adjust buffer size as needed
-	}
-	ch := threadSSEChannels[threadID]
-	mutex.Unlock()
 
-	// Set SSE Headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
@@ -237,82 +298,54 @@ func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
 		return
 	}
 
-	// Stream messages for the specific thread
+	// Create a new channel for the threadID if it does not exist or use the existing one.
+	mutex.Lock()
+	ch, exists := threadSSEChannels[threadID]
+	if !exists {
+		ch = make(chan string, 100)
+		threadSSEChannels[threadID] = ch
+		threadSSEClosed[threadID] = false
+	}
+	mutex.Unlock()
+
+	// Clean up routine to handle closing the channel and removing from the map.
+	defer func() {
+		mutex.Lock()
+		if !threadSSEClosed[threadID] {
+			close(ch)
+			threadSSEClosed[threadID] = true
+			delete(threadSSEChannels, threadID)
+		}
+		mutex.Unlock()
+	}()
+
+	// Handle client-side disconnection.
+	notify := c.Request.Context().Done()
+	go func() {
+		<-notify
+		mutex.Lock()
+		if !threadSSEClosed[threadID] {
+			close(ch)
+			threadSSEClosed[threadID] = true
+			delete(threadSSEChannels, threadID)
+		}
+		mutex.Unlock()
+	}()
+
+	// Stream messages for the specific thread.
 	for {
 		select {
-		case response := <-ch:
-			messageID := uuid.New().String()             // Generate a unique ID for the message
-			createdAt := time.Now().Format(time.RFC3339) // Format the current time
-
-			// Create a JSON response with the message ID and timestamp
+		case response, ok := <-ch:
+			if !ok {
+				return // Channel was closed, exit the handler.
+			}
+			messageID := uuid.New().String()
+			createdAt := time.Now().Format(time.RFC3339)
 			jsonResponse := fmt.Sprintf(`{"id": %q, "content": %q, "role": "assistant", "createdAt": %q}`, messageID, response, createdAt)
 			fmt.Fprintf(c.Writer, "data: %s\n\n", jsonResponse)
 			flusher.Flush()
-
-		case <-c.Request.Context().Done():
-			// Cleanup when client disconnects
-			mutex.Lock()
-			close(ch)
-			delete(threadSSEChannels, threadID)
-			mutex.Unlock()
-			return
+		case <-notify:
+			return // Exit the handler when we're done.
 		}
 	}
-}
-
-// FetchSuggestion handles the request to fetch suggestions from OpenAI.
-func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
-	// Extract user ID from context, if required
-	_, err := common.GetUserIDFromContext(c)
-	if err != nil {
-		common.RespondWithError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Retrieve the OpenAI client from the context
-	openaiClient, exists := c.MustGet("openaiClient").(*openai.Client)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "OpenAI client not available"})
-		return
-	}
-	type RequestData struct {
-		Model string `json:"model"`
-	}
-
-	// Bind the input data (assumed to be the model name)
-	var requestData RequestData
-	if err := c.ShouldBindJSON(&requestData); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
-		return
-	}
-
-	// Construct the prompt
-	prompt := `Provide four engaging recommendations (max 10 words each) as JSON: [{ "title": "", "content": "" }, ...]`
-
-	// Create the request payload and send the request to OpenAI
-	resp, err := openaiClient.CreateChatCompletion(
-		context.Background(),
-		openai.ChatCompletionRequest{
-			Model:            requestData.Model,
-			Messages:         []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
-			Temperature:      0.7,
-			TopP:             1,
-			FrequencyPenalty: 0,
-			PresencePenalty:  0,
-			MaxTokens:        1000,
-			N:                1,
-			Stream:           false,
-		},
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
-		return
-	}
-
-	// Check if the response has content and return the content
-	if len(resp.Choices) > 0 && len(resp.Choices[0].Message.Content) > 0 {
-		c.JSON(http.StatusOK, resp.Choices[0].Message.Content)
-		return
-	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
 }
