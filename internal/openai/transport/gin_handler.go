@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -173,15 +172,7 @@ func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
 }
 
-// Define a map to hold channels and a corresponding closed state for each thread
-var (
-	threadSSEChannels = make(map[uuid.UUID]chan string)
-	threadSSEClosed   = make(map[uuid.UUID]bool)
-	threadSequenceNumbers = make(map[uuid.UUID]int64)
-	mutex             = &sync.RWMutex{}
-)
-
-
+// MessageHandler handles the incoming messages.
 func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	userID, err := common.GetUserIDFromContext(c)
 	if err != nil {
@@ -201,23 +192,25 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		return
 	}
 
+	// Binding the request data
 	var inputData openaimodel.OpenAITransactionInput
 	if err := c.ShouldBindJSON(&inputData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
 		return
 	}
+
 	// Log the user's message
-	err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+	if err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
 		ThreadID: threadID.String(),
 		Message:  string(inputData.Message),
 		Model:    inputData.Model,
 		Role:     "user",
-	})
-	if err != nil {
+	}); err != nil {
 		log.Printf("Error saving user transaction: %v", err)
 		return
 	}
-	// Set up the chat completion request using the OpenAI client
+
+	// Set up the chat completion request
 	req := openai.ChatCompletionRequest{
 		Model:     inputData.Model,
 		Stream:    true,
@@ -229,7 +222,9 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 			},
 		},
 	}
-	stream, err := openaiClient.CreateChatCompletionStream(context.Background(), req)
+
+	// Create chat completion stream
+	stream, err := openaiClient.CreateChatCompletionStream(h.ctx, req) // Use the handler's context
 	if err != nil {
 		log.Printf("CreateChatCompletionStream error: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create stream"})
@@ -237,128 +232,142 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	}
 	defer stream.Close()
 
+	// Stream the response from OpenAI and send parts to the client via SSE
+	h.streamResponse(c, threadID, userID, inputData.Model, stream)
+}
+
+func (h *OpenAIHandler) streamResponse(c *gin.Context, threadID uuid.UUID, userID uuid.UUID, model string, stream *openai.ChatCompletionStream) {
 	var responseBuilder strings.Builder
 
-	mutex.RLock()
-	ch, exists := threadSSEChannels[threadID]
-	mutex.RUnlock()
-
-	if !exists {
-		log.Printf("No channel found for thread ID %s, skipping message send.", threadID)
-		return
-	}
-
-	// Stream the response from OpenAI and send parts to the client via SSE
 	for {
 		response, err := stream.Recv()
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			log.Printf("Stream error: %v\n", err)
 			break
 		}
+
 		responseContent := response.Choices[0].Delta.Content
 		responseBuilder.WriteString(responseContent)
+
+		ch := h.ThreadSSEChannels[threadID] // Assume channel exists
+
 		select {
 		case ch <- responseContent:
+			// Successfully sent to channel
 		default:
 			log.Printf("Channel buffer full or closed. Dropping message for thread ID %s.", threadID)
 		}
 	}
 
-	// Log AI response as a transaction
-	err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+	if err := h.createTransaction(userID, openaimodel.OpenAITransactionInput{
 		ThreadID: threadID.String(),
 		Message:  responseBuilder.String(),
-		Model:    inputData.Model,
+		Model:    model,
 		Role:     "assistant",
-	})
-	if err != nil {
-		log.Printf("Error saving user transaction: %v", err)
+	}); err != nil {
+		log.Printf("Error saving assistant transaction: %v", err)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Message received and processed"})
 }
+
 func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
-    threadID, err := uuid.Parse(c.Param("threadID"))
-    if err != nil {
-        common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
-        return
-    }
+	threadID, err := uuid.Parse(c.Param("threadID"))
+	if err != nil {
+		common.RespondWithError(c, http.StatusBadRequest, "Invalid thread ID")
+		return
+	}
 
-    c.Writer.Header().Set("Content-Type", "text/event-stream")
-    c.Writer.Header().Set("Cache-Control", "no-cache")
-    c.Writer.Header().Set("Connection", "keep-alive")
-    c.Writer.Header().Set("Transfer-Encoding", "chunked")
+	// Set headers for SSE
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("Transfer-Encoding", "chunked")
 
-    flusher, ok := c.Writer.(http.Flusher)
-    if !ok {
-        common.RespondWithError(c, http.StatusInternalServerError, "Streaming not supported")
-        return
-    }
+	// Ensure the channel exists and return the channel
+	ch := h.ensureChannelExists(threadID, c.Writer)
 
-     // Lock the mutex to safely access the maps
-	 mutex.Lock()
-	 ch, exists := threadSSEChannels[threadID]
-	 sequenceNumber, seqExists := threadSequenceNumbers[threadID]
-	 if !exists {
-		 ch = make(chan string, 100) // Buffer of 100 messages
-		 threadSSEChannels[threadID] = ch
-		 threadSSEClosed[threadID] = false
-	 }
-	 if !seqExists {
-		 // Initialize sequence number for new channel
-		 threadSequenceNumbers[threadID] = 0
-	 }
-	 mutex.Unlock()
+	// Just ensuring the channel and goroutine are set up correctly
+	if ch == nil {
+		common.RespondWithError(c, http.StatusInternalServerError, "Failed to set up SSE stream")
+		return
+	}
 
-    defer func() {
-        mutex.Lock()
-        close(ch)
-        delete(threadSSEChannels, threadID)
-        delete(threadSequenceNumbers, threadID)
-        threadSSEClosed[threadID] = true
-        mutex.Unlock()
-    }()
+	// Keep the connection open until the client closes it
+	<-c.Request.Context().Done()
+	log.Println("Client closed connection")
 
-    notify := c.Request.Context().Done()
-    go func() {
-        <-notify
-        mutex.Lock()
-        if !threadSSEClosed[threadID] {
-            close(ch)
-            delete(threadSSEChannels, threadID)
-            delete(threadSequenceNumbers, threadID)
-            threadSSEClosed[threadID] = true
-        }
-        mutex.Unlock()
-        log.Printf("SSE stream for thread ID %s closed\n", threadID)
-    }()
-
-    for {
-        select {
-        case response, ok := <-ch:
-            if !ok {
-                log.Printf("Channel for thread ID %s has been closed", threadID)
-                return // Channel was closed, exit the handler.
-            }
-            messageID := uuid.New().String()
-            createdAt := time.Now().Format(time.RFC3339)
-
-            mutex.Lock()
-            sequenceNumber++
-            threadSequenceNumbers[threadID] = sequenceNumber
-            mutex.Unlock()
-
-            jsonResponse := fmt.Sprintf(`{"id": %q, "sequence": %d, "content": %q, "role": "assistant", "createdAt": %q}`, messageID, sequenceNumber, response, createdAt)
-
-            fmt.Fprintf(c.Writer, "data: %s\n\n", jsonResponse)
-            flusher.Flush()
-            log.Printf("Sent message with sequence %d for thread ID %s", sequenceNumber, threadID)
-        case <-notify:
-            log.Printf("Received notification to close SSE stream for thread ID %s", threadID)
-            return // Exit the handler when we're done.
-        }
-    }
+	// Cancel the receiving goroutine when the client closes the connection
+	if cancel, exists := h.CancelFuncs[threadID]; exists {
+		cancel()
+	}
 }
+
+func (h *OpenAIHandler) ensureChannelExists(threadID uuid.UUID, w http.ResponseWriter) chan string {
+	h.Mutex.Lock()
+	defer h.Mutex.Unlock()
+
+	ch, exists := h.ThreadSSEChannels[threadID]
+	if !exists {
+		ch = make(chan string, 100)
+		h.ThreadSSEChannels[threadID] = ch
+	}
+
+	// Cancel the old goroutine if it exists
+	if cancel, exists := h.CancelFuncs[threadID]; exists {
+		cancel()
+	}
+
+	// Create a new context with a cancel function
+	ctx, cancel := context.WithCancel(h.ctx)
+
+	// Store the cancel function
+	h.CancelFuncs[threadID] = cancel
+
+	h.startReceiving(ctx, threadID, ch, w) // Always start a new goroutine
+
+	return ch
+}
+
+func (h *OpenAIHandler) startReceiving(ctx context.Context, threadID uuid.UUID, ch chan string, w http.ResponseWriter) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		log.Println("Streaming not supported")
+		return
+	}
+
+	go func() {
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return // Channel was closed, exit the goroutine.
+				}
+
+				messageID := uuid.New().String()
+				createdAt := time.Now().Format(time.RFC3339)
+				jsonResponse := fmt.Sprintf(`{"id": %q, "content": %q, "role": "assistant", "createdAt": %q}`, messageID, msg, createdAt)
+
+				fmt.Fprintf(w, "data: %s\n\n", jsonResponse)
+				flusher.Flush()
+
+			case <-ctx.Done():
+				return // Context was cancelled, exit the goroutine.
+			}
+		}
+	}()
+}
+
+// func getGoroutineID() uint64 {
+// 	var buf [64]byte
+// 	n := runtime.Stack(buf[:], false)
+// 	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+// 	id, err := strconv.ParseUint(idField, 10, 64)
+// 	if err != nil {
+// 		log.Printf("Failed to parse goroutine id: %v", err)
+// 		return 0
+// 	}
+// 	return id
+// }
