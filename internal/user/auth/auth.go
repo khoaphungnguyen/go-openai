@@ -9,7 +9,7 @@ import (
 
 const (
 	// Define the default expiration times for tokens.
-	DefaultAccessTokenDuration  = 120 * time.Minute
+	DefaultAccessTokenDuration  = 30 * time.Second
 	DefaultRefreshTokenDuration = 7 * 24 * time.Hour
 )
 

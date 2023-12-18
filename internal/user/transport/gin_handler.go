@@ -73,10 +73,10 @@ func (h *UserHandler) Login(c *gin.Context) {
 	}
 
 	// Handle last login time.
-	lastLoginStr := "Never" // Default message for first-time login.
-	if user.LastLogin != nil {
-		lastLoginStr = user.LastLogin.Format(time.RFC3339)
-	}
+	// lastLoginStr := "Never" // Default message for first-time login.
+	// if user.LastLogin != nil {
+	// 	lastLoginStr = user.LastLogin.Format(time.RFC3339)
+	// }
 
 	// Update last login time.
 	now := time.Now()
@@ -118,18 +118,35 @@ func (h *UserHandler) Login(c *gin.Context) {
 		MaxAge:   int(jwtWrapper.RefreshTokenExpiration.Seconds()),
 	})
 
+	// log.Println("Refresh token:", signedRefreshToken)
+	// log.Println("userId:", user.ID.String())
+
 	// Prepare and send the response.
 	response := gin.H{
-		"accessToken": signedToken,
-		"lastLogin":   lastLoginStr,
+		"id":           user.ID,
+		"name":         user.FullName,
+		"accessToken":  signedToken,
+		"refreshToken": signedRefreshToken,
+		//"lastLogin":   lastLoginStr,
 	}
 	c.JSON(http.StatusOK, response)
 }
 
+type RefreshTokenInput struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
 // RenewAccessToken handles the renewal of the access token using the refresh token.
 func (h *UserHandler) RenewAccessToken(c *gin.Context) {
-	refreshToken, err := c.Cookie("refreshToken")
-	if err != nil {
+
+	var input RefreshTokenInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	refreshToken := input.RefreshToken
+	if refreshToken == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Refresh token required"})
 		return
 	}
@@ -165,8 +182,8 @@ func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error signing new token"})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"token": newAccessToken})
+	log.Println("New access token:", newAccessToken)
+	c.JSON(http.StatusOK, gin.H{"accessToken": newAccessToken})
 }
 
 // UpdateProfile handles updating user information.

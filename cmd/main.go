@@ -79,7 +79,7 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 	{
 		auth.POST("/login", userHandler.Login)
 		auth.POST("/signup", userHandler.Signup)
-		auth.POST("/token/renew", userHandler.RenewAccessToken)
+		auth.POST("/refresh", userHandler.RenewAccessToken)
 	}
 
 	protected := router.Group("/protected").Use(middleware.AuthMiddleware(jwtKey))
