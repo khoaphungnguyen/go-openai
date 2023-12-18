@@ -123,9 +123,10 @@ func (h *UserHandler) Login(c *gin.Context) {
 
 	// Prepare and send the response.
 	response := gin.H{
-		"id":           user.ID,
-		"name":         user.FullName,
-		"accessToken":  signedToken,
+		"id":          user.ID,
+		"name":        user.FullName,
+		"expiresIn":   time.Now().Add(time.Second * time.Duration(jwtWrapper.AccessTokenExpiration.Seconds())).Unix(),
+		"accessToken": signedToken,
 		"refreshToken": signedRefreshToken,
 		//"lastLogin":   lastLoginStr,
 	}
@@ -183,7 +184,10 @@ func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 		return
 	}
 	log.Println("New access token:", newAccessToken)
-	c.JSON(http.StatusOK, gin.H{"accessToken": newAccessToken})
+	c.JSON(http.StatusOK, gin.H{
+		"accessToken": newAccessToken,
+		"expiresIn":   time.Now().Add(time.Second * time.Duration(jwtWrapper.AccessTokenExpiration.Seconds())).Unix(),
+	})
 }
 
 // UpdateProfile handles updating user information.
