@@ -250,7 +250,11 @@ func (h *OpenAIHandler) streamResponse(c *gin.Context, threadID uuid.UUID, userI
 		responseContent := response.Choices[0].Delta.Content
 		responseBuilder.WriteString(responseContent)
 
-		ch := h.ThreadSSEChannels[threadID] // Assume channel exists
+		ch, exists := h.ThreadSSEChannels[threadID]
+		if !exists {
+			ch = make(chan string, 100)
+			h.ThreadSSEChannels[threadID] = ch
+		}
 
 		select {
 		case ch <- responseContent:
@@ -371,4 +375,3 @@ func (h *OpenAIHandler) startReceiving(ctx context.Context, threadID uuid.UUID, 
 // 	}
 // 	return id
 // }
-
