@@ -1,7 +1,9 @@
 package openaitransport
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +17,44 @@ import (
 	openaimodel "github.com/khoaphungnguyen/go-openai/internal/openai/model"
 	"github.com/sashabaranov/go-openai"
 )
+
+type LocalMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type LocalChat struct {
+	Model    string         `json:"model"`
+	Messages []LocalMessage `json:"messages"`
+	Stream   bool           `json:"stream"`
+	Format   string         `json:"format"`
+}
+
+type LocalRequest struct {
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
+	Stream bool   `json:"stream"`
+}
+
+type Response struct {
+	Model     string       `json:"model"`
+	CreatedAt string       `json:"created_at"`
+	Message   LocalMessage `json:"message"`
+	Done      bool         `json:"done"`
+}
+
+type LocalResponse struct {
+	Model     string `json:"model"`
+	CreatedAt string `json:"created_at"`
+	Response  string `json:"response"`
+	Done      bool   `json:"done"`
+}
+
+type Options struct {
+	Temperature float64
+	NumPredict  int
+	NumCtx      int
+}
 
 // CreateTransaction handles the creation of a new OpenAI transaction (HTTP Handler).
 func (h *OpenAIHandler) CreateTransaction(c *gin.Context) {
@@ -141,35 +181,71 @@ func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
 		return
 	}
 
-	// Construct the prompt
-	prompt := `Provide four engaging recommendations (max 10 words each) as JSON: [{ "title": "", "content": "" }, ...]`
+	if requestData.Model == "default" {
+		// Construct the prompt
+		prompt := `Provide four engaging recommendations (max 10 words each) as JSON :: [{ "title": "", "content": "" }, ...]`
+		req := LocalRequest{
+			Model:  "mistral",
+			Prompt: prompt,
+			Stream: false,
+		}
+		reqJson, _ := json.Marshal(req)
+		resp, err := http.Post("http://localhost:11434/api/generate", "application/json", bytes.NewBuffer(reqJson))
+		if err != nil {
+			// handle error
+			log.Println(err)
+		}
+		defer resp.Body.Close()
+		// Create the request payload and send the request
+		message, err := io.ReadAll(resp.Body)
+		if err != nil {
+			// handle error
+			log.Println(err)
+		}
 
-	// Create the request payload and send the request to OpenAI
-	resp, err := openaiClient.CreateChatCompletion(
-		context.Background(),
-		openai.ChatCompletionRequest{
-			Model:            requestData.Model,
-			Messages:         []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
-			Temperature:      0.7,
-			TopP:             1,
-			FrequencyPenalty: 0,
-			PresencePenalty:  0,
-			MaxTokens:        1000,
-			N:                1,
-			Stream:           false,
-		},
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
-		return
-	}
+		var respData LocalResponse
+		err = json.Unmarshal(message, &respData)
+		if err != nil {
+			// handle error
+			log.Println(err)
+		}
 
-	// Check if the response has content and return the content
-	if len(resp.Choices) > 0 && len(resp.Choices[0].Message.Content) > 0 {
-		c.JSON(http.StatusOK, resp.Choices[0].Message.Content)
-		return
+		// Check if the response has content and return the content
+		if len(respData.Response) > 0 {
+			c.JSON(http.StatusOK, respData.Response)
+			return
+		}
+	} else {
+		// Construct the prompt
+		prompt := `Provide only four engaging recommendations (max 10 words each) as JSON 
+		: [{ "title": "", "content": "" }, ...]`
+		// Create the request payload and send the request to OpenAI
+		resp, err := openaiClient.CreateChatCompletion(
+			context.Background(),
+			openai.ChatCompletionRequest{
+				Model:            requestData.Model,
+				Messages:         []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
+				Temperature:      0.7,
+				TopP:             1,
+				FrequencyPenalty: 0,
+				PresencePenalty:  0,
+				MaxTokens:        1000,
+				N:                1,
+				Stream:           false,
+			},
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
+			return
+		}
+
+		// Check if the response has content and return the content
+		if len(resp.Choices) > 0 && len(resp.Choices[0].Message.Content) > 0 {
+			c.JSON(http.StatusOK, resp.Choices[0].Message.Content)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
 }
 
 // MessageHandler handles the incoming messages.
@@ -209,31 +285,95 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		log.Printf("Error saving user transaction: %v", err)
 		return
 	}
-
-	// Set up the chat completion request
-	req := openai.ChatCompletionRequest{
-		Model:     inputData.Model,
-		Stream:    true,
-		MaxTokens: 1000,
-		Messages: []openai.ChatCompletionMessage{
-			{
-				Role:    "user",
-				Content: inputData.Message,
+	if inputData.Model == "default" {
+		chat := LocalChat{
+			Model: "llama2:13b-chat",
+			Messages: []LocalMessage{
+				{
+					Role:    "user",
+					Content: inputData.Message,
+				},
 			},
-		},
+			Stream: true,
+		}
+		chatJson, _ := json.Marshal(chat)
+		stream, err := http.Post("http://localhost:11434/api/chat", "application/json", bytes.NewBuffer(chatJson))
+		if err != nil {
+			// handle error
+			log.Println(err)
+		}
+		defer stream.Body.Close()
+		// Stream the response from OpenAI and send parts to the client via SSE
+		h.localStreamResponse(c, threadID, userID, inputData.Model, stream)
+	} else {
+
+		// Set up the chat completion request
+		req := openai.ChatCompletionRequest{
+			Model:     inputData.Model,
+			Stream:    true,
+			MaxTokens: 1000,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    "user",
+					Content: inputData.Message,
+				},
+			},
+		}
+
+		// Create chat completion stream
+		stream, err := openaiClient.CreateChatCompletionStream(h.ctx, req) // Use the handler's context
+		if err != nil {
+			log.Printf("CreateChatCompletionStream error: %v\n", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create stream"})
+			return
+		}
+		defer stream.Close()
+		// Stream the response from OpenAI and send parts to the client via SSE
+		h.streamResponse(c, threadID, userID, inputData.Model, stream)
+	}
+}
+
+func (h *OpenAIHandler) localStreamResponse(c *gin.Context, threadID uuid.UUID, userID uuid.UUID, model string, stream *http.Response) {
+	var responseBuilder strings.Builder
+	// Create a new JSON decoder for the response body
+	decoder := json.NewDecoder(stream.Body)
+	for {
+		var response Response
+		if err := decoder.Decode(&response); err == io.EOF {
+			break
+		} else if err != nil {
+			// handle error
+			log.Println(err)
+		}
+
+		responseContent := response.Message.Content
+		responseBuilder.WriteString(responseContent)
+
+		ch, exists := h.ThreadSSEChannels[threadID]
+		if !exists {
+			ch = make(chan string, 100)
+			h.ThreadSSEChannels[threadID] = ch
+		}
+
+		select {
+		case ch <- responseContent:
+			// Successfully sent to channel
+		default:
+			log.Printf("Channel buffer full or closed. Dropping message for thread ID %s.", threadID)
+		}
 	}
 
-	// Create chat completion stream
-	stream, err := openaiClient.CreateChatCompletionStream(h.ctx, req) // Use the handler's context
-	if err != nil {
-		log.Printf("CreateChatCompletionStream error: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create stream"})
+	if err := h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+		ThreadID: threadID.String(),
+		Message:  responseBuilder.String(),
+		Model:    model,
+		Role:     "assistant",
+	}); err != nil {
+		log.Printf("Error saving assistant transaction: %v", err)
 		return
 	}
-	defer stream.Close()
 
-	// Stream the response from OpenAI and send parts to the client via SSE
-	h.streamResponse(c, threadID, userID, inputData.Model, stream)
+	c.JSON(http.StatusOK, gin.H{"message": "Message received and processed"})
 }
 
 func (h *OpenAIHandler) streamResponse(c *gin.Context, threadID uuid.UUID, userID uuid.UUID, model string, stream *openai.ChatCompletionStream) {
@@ -363,15 +503,3 @@ func (h *OpenAIHandler) startReceiving(ctx context.Context, threadID uuid.UUID, 
 		}
 	}()
 }
-
-// func getGoroutineID() uint64 {
-// 	var buf [64]byte
-// 	n := runtime.Stack(buf[:], false)
-// 	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
-// 	id, err := strconv.ParseUint(idField, 10, 64)
-// 	if err != nil {
-// 		log.Printf("Failed to parse goroutine id: %v", err)
-// 		return 0
-// 	}
-// 	return id
-// }

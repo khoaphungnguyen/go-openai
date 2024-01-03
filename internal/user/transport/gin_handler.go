@@ -139,31 +139,31 @@ type RefreshTokenInput struct {
 
 // RenewAccessToken handles the renewal of the access token using the refresh token.
 func (h *UserHandler) RenewAccessToken(c *gin.Context) {
-
+	log.Println("RenewAccessToken")
 	var input RefreshTokenInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	log.Println("Got here 1")
 	refreshToken := input.RefreshToken
 	if refreshToken == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Refresh token required"})
 		return
 	}
-
+	log.Println("Got here 2")
 	jwtWrapper := userauth.JwtWrapper{
 		SecretKey:             h.JWTKey,
 		Issuer:                "AuthService",
 		AccessTokenExpiration: userauth.DefaultAccessTokenDuration,
 	}
-
+	log.Println("Got here 3")
 	claims, err := jwtWrapper.ValidateToken(refreshToken)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 		return
 	}
-
+	log.Println("Got here 4")
 	userID, err := uuid.Parse(claims.UserID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
