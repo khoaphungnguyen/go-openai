@@ -180,12 +180,11 @@ func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
 		return
 	}
-
-	if requestData.Model == "default" {
+	if !strings.HasPrefix(requestData.Model, "gpt") {
 		// Construct the prompt
 		prompt := `Provide four engaging recommendations (max 10 words each) as JSON :: [{ "title": "", "content": "" }, ...]`
 		req := LocalRequest{
-			Model:  "mistral",
+			Model:  requestData.Model,
 			Prompt: prompt,
 			Stream: false,
 		}
@@ -285,9 +284,9 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		log.Printf("Error saving user transaction: %v", err)
 		return
 	}
-	if inputData.Model == "default" {
+	if !strings.HasPrefix(inputData.Model, "gpt") {
 		chat := LocalChat{
-			Model: "llama2:13b-chat",
+			Model: inputData.Model,
 			Messages: []LocalMessage{
 				{
 					Role:    "user",

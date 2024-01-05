@@ -27,6 +27,7 @@ type ChatThread struct {
 	ID        uuid.UUID `gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
 	UserID    uuid.UUID `gorm:"type:uuid"`
 	Title     string    `gorm:"type:varchar(255)"`
+	Model     string    `gorm:"type:varchar(255)"`
 	CreatedAt time.Time `gorm:"default:now()"`
 	UpdatedAt time.Time `gorm:"default:now()"`
 }
@@ -37,8 +38,8 @@ func (ChatThread) TableName() string {
 }
 
 type ChatMessageResponse struct {
-	ID        uuid.UUID `json:"id"`  
-    Content   string    `json:"content"`
-    Role      string    `json:"role"`
-    CreatedAt time.Time `json:"createdAt"`
+	ID        uuid.UUID `json:"id"`
+	Content   string    `json:"content"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"createdAt"`
 }

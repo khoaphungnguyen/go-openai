@@ -3,6 +3,7 @@ package messagetransport
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,12 +14,13 @@ import (
 )
 
 type ThreadPayload struct {
-	Title string `json:"title"`
+	Model string `json:"model"`
 }
 
 type ThreadResponse struct {
 	ID        uuid.UUID `json:"id"`
 	Title     string    `json:"title"`
+	Model     string    `json:"model"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -44,9 +46,11 @@ func (mh *MessageHandler) CreateThread(c *gin.Context) {
 		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	log.Println("model: ", payload.Model)
 
 	thread := &messagemodel.ChatThread{
-		Title:  payload.Title,
+		Title:  "New thread",
+		Model:  payload.Model,
 		UserID: userID,
 	}
 
@@ -216,6 +220,7 @@ func convertToThreadResponse(thread *messagemodel.ChatThread) ThreadResponse {
 	return ThreadResponse{
 		ID:        thread.ID,
 		Title:     thread.Title,
+		Model:     thread.Model,
 		CreatedAt: thread.CreatedAt,
 		UpdatedAt: thread.UpdatedAt,
 	}
