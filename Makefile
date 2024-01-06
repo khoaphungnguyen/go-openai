@@ -8,7 +8,7 @@ all:
 # Start PostgreSQL and run migrations as a one-off task
 setup:
 	docker-compose up -d postgres
-	sleep 10 # Give time for the database to be ready
+	sleep 3 # Give time for the database to be ready
 	docker-compose run --rm migrate
 
 # Stop and remove all services, networks, and volumes

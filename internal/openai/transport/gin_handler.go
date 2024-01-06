@@ -247,6 +247,11 @@ func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
 	}
 }
 
+type MessageInput struct {
+	Messages []LocalMessage `json:"messages"`
+	Model    string         `json:"model"`
+}
+
 // MessageHandler handles the incoming messages.
 func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	userID, err := common.GetUserIDFromContext(c)
@@ -268,16 +273,21 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	}
 
 	// Binding the request data
-	var inputData openaimodel.OpenAITransactionInput
+	var inputData MessageInput
 	if err := c.ShouldBindJSON(&inputData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
 		return
+	}
+	var message string
+	if len(inputData.Messages) > 0 {
+		// Get the content of the last message
+		message = inputData.Messages[len(inputData.Messages)-1].Content
 	}
 
 	// Log the user's message
 	if err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
 		ThreadID: threadID.String(),
-		Message:  string(inputData.Message),
+		Message:  message,
 		Model:    inputData.Model,
 		Role:     "user",
 	}); err != nil {
@@ -286,14 +296,9 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	}
 	if !strings.HasPrefix(inputData.Model, "gpt") {
 		chat := LocalChat{
-			Model: inputData.Model,
-			Messages: []LocalMessage{
-				{
-					Role:    "user",
-					Content: inputData.Message,
-				},
-			},
-			Stream: true,
+			Model:    inputData.Model,
+			Messages: inputData.Messages,
+			Stream:   true,
 		}
 		chatJson, _ := json.Marshal(chat)
 		stream, err := http.Post("http://localhost:11434/api/chat", "application/json", bytes.NewBuffer(chatJson))
@@ -306,17 +311,22 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		h.localStreamResponse(c, threadID, userID, inputData.Model, stream)
 	} else {
 
+		// Convert []LocalMessage to []openai.ChatCompletionMessage
+		var messages []openai.ChatCompletionMessage
+		for _, localMessage := range inputData.Messages {
+			messages = append(messages, openai.ChatCompletionMessage{
+				Role:    localMessage.Role,
+				Content: localMessage.Content,
+				// Add other fields as necessary
+			})
+		}
+
 		// Set up the chat completion request
 		req := openai.ChatCompletionRequest{
 			Model:     inputData.Model,
 			Stream:    true,
 			MaxTokens: 1000,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    "user",
-					Content: inputData.Message,
-				},
-			},
+			Messages:  messages,
 		}
 
 		// Create chat completion stream

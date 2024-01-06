@@ -3,7 +3,6 @@ package messagetransport
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -46,7 +45,6 @@ func (mh *MessageHandler) CreateThread(c *gin.Context) {
 		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	log.Println("model: ", payload.Model)
 
 	thread := &messagemodel.ChatThread{
 		Title:  "New thread",

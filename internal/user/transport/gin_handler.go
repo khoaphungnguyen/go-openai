@@ -183,7 +183,6 @@ func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error signing new token"})
 		return
 	}
-	log.Println("New access token:", newAccessToken)
 	c.JSON(http.StatusOK, gin.H{
 		"accessToken": newAccessToken,
 		"expiresIn":   time.Now().Add(time.Second * time.Duration(jwtWrapper.AccessTokenExpiration.Seconds())).Unix(),
