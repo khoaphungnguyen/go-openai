@@ -8,8 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -310,12 +308,13 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	}
 
 	// Create a new context with a cancel function
-	ctx, cancel := context.WithCancel(h.ctx)
-
+	ctx, cancel := context.WithCancel(context.Background())
 	//Set the cancel function for the thread ID
 	h.Mutex.Lock()
-	h.CancelFuncs[threadID] = cancel
+	h.CancelFuncsLLM[threadID] = cancel
+
 	h.Mutex.Unlock()
+
 	if !strings.HasPrefix(inputData.Model, "gpt") {
 		chat := LocalChat{
 			Model:    inputData.Model,
@@ -359,27 +358,11 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 		}
 		defer stream.Close()
 		// Stream the response from OpenAI and send parts to the client via SSE
-		h.streamResponse(c, threadID, userID, inputData.Model, stream)
+		h.openAIStreamResponse(c, ctx, threadID, userID, inputData.Model, stream)
 	}
-}
-
-func (h *OpenAIHandler) StopGeneration(threadID uuid.UUID) error {
-	h.Mutex.Lock()
-	defer h.Mutex.Unlock()
-
-	if cancel, ok := h.CancelFuncs[threadID]; ok {
-		cancel()
-		delete(h.CancelFuncs, threadID)
-	} else {
-		return fmt.Errorf("no cancel function for thread ID %v", threadID)
-	}
-
-	return nil
 }
 
 func (h *OpenAIHandler) localStreamResponse(c *gin.Context, ctx context.Context, threadID uuid.UUID, userID uuid.UUID, model string, stream *http.Response) {
-	// // Create a new context that will be cancelled when the generation is stopped
-	// ctx, cancel := context.WithCancel(context.Background())
 
 	var responseBuilder strings.Builder
 
@@ -427,9 +410,6 @@ loop:
 			}
 
 			responseContent := response.Message.Content
-			//log.Println("Sending response to channel: ", responseContent)
-			// Check go rountine ID
-			//log.Println("Goroutine ID: ", getGoroutineID())
 			responseBuilder.WriteString(responseContent)
 
 			ch, exists := h.ThreadSSEChannels[threadID]
@@ -448,46 +428,75 @@ loop:
 	}
 }
 
-func (h *OpenAIHandler) streamResponse(c *gin.Context, threadID uuid.UUID, userID uuid.UUID, model string, stream *openai.ChatCompletionStream) {
+func (h *OpenAIHandler) openAIStreamResponse(c *gin.Context, ctx context.Context, threadID uuid.UUID, userID uuid.UUID, model string, stream *openai.ChatCompletionStream) {
 	var responseBuilder strings.Builder
 
+	// Defer the saving logic so it always runs, even if the function returns early
+	defer func() {
+		if err := h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+			ThreadID: threadID.String(),
+			Message:  responseBuilder.String(),
+			Model:    model,
+			Role:     "assistant",
+		}); err != nil {
+			log.Printf("Error saving assistant transaction: %v", err)
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Message received and processed"})
+	}()
+
+loop:
 	for {
-		response, err := stream.Recv()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			break
-		}
-
-		responseContent := response.Choices[0].Delta.Content
-		responseBuilder.WriteString(responseContent)
-
-		ch, exists := h.ThreadSSEChannels[threadID]
-		if !exists {
-			ch = make(chan string, 100)
-			h.ThreadSSEChannels[threadID] = ch
-		}
-		log.Println("Sending response to channel: ", responseContent)
-
 		select {
-		case ch <- responseContent:
-			// Successfully sent to channel
+		case <-ctx.Done():
+			// If the context has been cancelled, stop reading from the stream
+			ch, exists := h.ThreadSSEChannels[threadID]
+			if !exists {
+				ch = make(chan string, 100)
+				h.ThreadSSEChannels[threadID] = ch
+			}
+			ch <- ""
+			return
 		default:
-			log.Printf("Channel buffer full or closed. Dropping message for thread ID %s.", threadID)
+
+			// If the context has not been cancelled, read the next line from the stream
+			response, err := stream.Recv()
+			if err == io.EOF {
+				break loop
+			} else if err != nil {
+				break loop
+			}
+
+			responseContent := response.Choices[0].Delta.Content
+			responseBuilder.WriteString(responseContent)
+
+			ch, exists := h.ThreadSSEChannels[threadID]
+			if !exists {
+				ch = make(chan string, 100)
+				h.ThreadSSEChannels[threadID] = ch
+			}
+
+			select {
+			case ch <- responseContent:
+				// Successfully sent to channel
+			default:
+				log.Printf("Channel buffer full or closed. Dropping message for thread ID %s.", threadID)
+			}
 		}
 	}
+}
 
-	if err := h.createTransaction(userID, openaimodel.OpenAITransactionInput{
-		ThreadID: threadID.String(),
-		Message:  responseBuilder.String(),
-		Model:    model,
-		Role:     "assistant",
-	}); err != nil {
-		log.Printf("Error saving assistant transaction: %v", err)
-		return
+func (h *OpenAIHandler) StopGeneration(threadID uuid.UUID) error {
+	h.Mutex.Lock()
+	defer h.Mutex.Unlock()
+
+	if cancel, ok := h.CancelFuncsLLM[threadID]; ok {
+		cancel()
+		delete(h.CancelFuncs, threadID)
+	} else {
+		return fmt.Errorf("no cancel function for thread ID %v", threadID)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Message received and processed"})
+	return nil
 }
 
 func (h *OpenAIHandler) SSEHandler(c *gin.Context) {
@@ -557,8 +566,6 @@ func (h *OpenAIHandler) startReceiving(ctx context.Context, threadID uuid.UUID, 
 		return
 	}
 
-	log.Println("Goroutine ID client:", getGoroutineID(), "Thread ID:", threadID)
-
 	go func() {
 		for {
 			select {
@@ -583,14 +590,14 @@ func (h *OpenAIHandler) startReceiving(ctx context.Context, threadID uuid.UUID, 
 	}()
 }
 
-func getGoroutineID() uint64 {
-	var buf [64]byte
-	n := runtime.Stack(buf[:], false)
-	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
-	id, err := strconv.ParseUint(idField, 10, 64)
-	if err != nil {
-		log.Printf("Failed to parse goroutine id: %v", err)
-		return 0
-	}
-	return id
-}
+// func getGoroutineID() uint64 {
+// 	var buf [64]byte
+// 	n := runtime.Stack(buf[:], false)
+// 	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+// 	id, err := strconv.ParseUint(idField, 10, 64)
+// 	if err != nil {
+// 		log.Printf("Failed to parse goroutine id: %v", err)
+// 		return 0
+// 	}
+// 	return id
+// }

@@ -17,6 +17,7 @@ type OpenAIHandler struct {
     ctx               context.Context
     // CancelFuncs stores the cancel functions for each thread ID
     CancelFuncs map[uuid.UUID]context.CancelFunc
+    CancelFuncsLLM map[uuid.UUID]context.CancelFunc
 }
 
 // NewOpenAIHandler creates a new instance of OpenAIHandler.
@@ -29,5 +30,6 @@ func NewOpenAIHandler(openAIService *openaibusiness.OpenAIService) *OpenAIHandle
         ctx:               ctx,
         // Initialize the CancelFuncs map
         CancelFuncs: make(map[uuid.UUID]context.CancelFunc),
+        CancelFuncsLLM: make(map[uuid.UUID]context.CancelFunc),
     }
 }
