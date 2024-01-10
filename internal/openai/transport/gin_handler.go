@@ -180,7 +180,6 @@ func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
 		return
 	}
-	log.Println("Request data: ", requestData.Model)
 	if !strings.HasPrefix(requestData.Model, "gpt") {
 		// Construct the prompt
 		prompt := `Provide four engaging recommendations (max 10 words each) as JSON :: [{ "title": "", "content": "" }, ...]`
@@ -343,10 +342,13 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 
 		// Set up the chat completion request
 		req := openai.ChatCompletionRequest{
-			Model:     inputData.Model,
-			Stream:    true,
-			MaxTokens: 1000,
-			Messages:  messages,
+			Model:            inputData.Model,
+			Stream:           true,
+			MaxTokens:        1000,
+			Messages:         messages,
+			Temperature:      0.7,
+			FrequencyPenalty: 0,
+			PresencePenalty:  0,
 		}
 
 		// Create chat completion stream
