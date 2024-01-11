@@ -54,7 +54,7 @@ func (h *OpenAIHandler) WebSocketHandler(c *gin.Context) {
 		}
 
 		// Log the user's message
-		err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+		_, err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
 			ThreadID: threadID.String(),
 			Message:  string(message),
 			Model:    "gpt-3.5-turbo",
@@ -105,7 +105,7 @@ func (h *OpenAIHandler) WebSocketHandler(c *gin.Context) {
 		}
 		stream.Close()
 		// Log the AI's response
-		err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+		_, err = h.createTransaction(userID, openaimodel.OpenAITransactionInput{
 			ThreadID: threadID.String(),
 			Message:  saveSteam,
 			Model:    "gpt-3.5-turbo",

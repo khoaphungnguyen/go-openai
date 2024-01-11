@@ -9,7 +9,7 @@ import (
 
 // OpenAIStore provides methods for OpenAI operations.
 type OpenAIStore interface {
-	CreateTransaction(transaction *openaimodel.OpenAITransaction) error
+	CreateTransaction(transaction *openaimodel.OpenAITransaction) (uuid.UUID, error)
 	GetTransactionsByUserID(userID uuid.UUID) ([]openaimodel.OpenAITransaction, error)
 	GetTransactionsByThreadID(threadID uuid.UUID) ([]openaimodel.OpenAITransaction, error)
 	GetTransactionByID(transactionID uuid.UUID) (*openaimodel.OpenAITransaction, error)

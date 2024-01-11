@@ -1,12 +1,15 @@
 package openaibusiness
 
 import (
+	"fmt"
+
 	"github.com/google/uuid"
 	messagemodel "github.com/khoaphungnguyen/go-openai/internal/message/model"
 	openaimodel "github.com/khoaphungnguyen/go-openai/internal/openai/model"
+	"github.com/pkoukk/tiktoken-go"
 )
 
-func (s *OpenAIService) CreateTransaction(userID, threadID uuid.UUID, message, model, role string) error {
+func (s *OpenAIService) CreateTransaction(userID, threadID uuid.UUID, message, model, role string) (uuid.UUID, error) {
 	chatMessage := &messagemodel.ChatMessage{
 		ThreadID: threadID,
 		UserID:   userID,
@@ -14,9 +17,18 @@ func (s *OpenAIService) CreateTransaction(userID, threadID uuid.UUID, message, m
 		Role:     role,
 	}
 
+	encoding := "cl100k_base"
+	tke, err := tiktoken.GetEncoding(encoding)
+	if err != nil {
+		err = fmt.Errorf("getEncoding: %v", err)
+		return uuid.Nil, err
+	}
+	// encode
+	token := tke.Encode(message, nil, nil)
+
 	// Save the message using the message service
 	if err := s.messageService.CreateMessage(userID, chatMessage); err != nil {
-		return err
+		return uuid.Nil, err
 	}
 
 	// Create and save the OpenAI transaction record
@@ -26,7 +38,7 @@ func (s *OpenAIService) CreateTransaction(userID, threadID uuid.UUID, message, m
 		MessageID:     chatMessage.ID,
 		Model:         model,
 		Role:          role,
-		MessageLength: len(message),
+		MessageLength: len(token),
 	}
 
 	return s.openAIStore.CreateTransaction(transaction)

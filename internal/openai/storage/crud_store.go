@@ -6,8 +6,12 @@ import (
 )
 
 // CreateTransaction saves a new transaction with the OpenAI API to the database.
-func (s *openAIStore) CreateTransaction(transaction *openaimodel.OpenAITransaction) error {
-	return s.db.Create(transaction).Error
+func (s *openAIStore) CreateTransaction(transaction *openaimodel.OpenAITransaction) (uuid.UUID, error) {
+    result := s.db.Create(transaction)
+    if result.Error != nil {
+        return uuid.Nil, result.Error
+    }
+    return transaction.ID, nil
 }
 
 // GetTransactionsByUserID finds OpenAI transactions for a given user ID.
