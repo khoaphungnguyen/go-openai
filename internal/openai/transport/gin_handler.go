@@ -248,6 +248,76 @@ func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
 	}
 }
 
+// FetchSuggestion handles the request to fetch suggestions from OpenAI.
+func (h *OpenAIHandler) FetchDrawing(c *gin.Context) {
+	// Extract user ID from context, if required
+	_, err := common.GetUserIDFromContext(c)
+	if err != nil {
+		common.RespondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Retrieve the OpenAI client from the context
+	openaiClient, exists := c.MustGet("openaiClient").(*openai.Client)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "OpenAI client not available"})
+		return
+	}
+
+	type RequestData struct {
+		ImageFile string `json:"imageFile"`
+	}
+
+	// Bind the input data (assumed to be the model name)
+	var requestData RequestData
+	if err := c.ShouldBindJSON(&requestData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
+		return
+	}
+
+	// Construct the prompt
+	systemPrompt := `You are an expert Tailwind developer. A user will provide you with a
+ low-fidelity wireframe of an application and you will return a single html file that uses Tailwind to create the website. Use creative license to make the application more fleshed out. If you need to insert an image, use placehold.co 
+ to create a placeholder image. Respond only with the html file.`
+
+	// Create the request payload and send the request to OpenAI
+	resp, err := openaiClient.CreateChatCompletion(
+		context.Background(),
+		openai.ChatCompletionRequest{
+			Model: "gpt-4-vision-preview",
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    "system",
+					Content: systemPrompt,
+				},
+				{
+					Role: "user",
+					MultiContent: []openai.ChatMessagePart{
+						{
+							Type: "image_url",
+							ImageURL: &openai.ChatMessageImageURL{
+								URL:    requestData.ImageFile,
+								Detail: openai.ImageURLDetailLow},
+						},
+					},
+				},
+			},
+			MaxTokens: 500,
+		},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
+		return
+	}
+
+	// Check if the response has content and return the content
+	if len(resp.Choices) > 0 && len(resp.Choices[0].Message.Content) > 0 {
+		c.JSON(http.StatusOK, resp.Choices[0].Message.Content)
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
+}
+
 type MessageInput struct {
 	Messages []LocalMessage `json:"messages"`
 	Model    string         `json:"model"`
@@ -460,71 +530,71 @@ loop:
 }
 
 func (h *OpenAIHandler) openAIStreamResponse(c *gin.Context, ctx context.Context, threadID uuid.UUID, userID uuid.UUID, model string, stream *openai.ChatCompletionStream) {
-    var responseBuilder strings.Builder
+	var responseBuilder strings.Builder
 
-    // Start a goroutine to do the processing in the background
+	// Start a goroutine to do the processing in the background
 
-        loop:
-        for {
-            select {
-            case <-ctx.Done():
-                // If the context has been cancelled, stop reading from the stream
-                ch, exists := h.ThreadSSEChannels[threadID]
-                if !exists {
-                    ch = make(chan string, 100)
-                    h.ThreadSSEChannels[threadID] = ch
-                }
-                ch <- ""
-                return
-            default:
-                // If the context has not been cancelled, read the next line from the stream
-                response, err := stream.Recv()
-                if err == io.EOF {
-                    break loop
-                } else if err != nil {
-                    break loop
-                }
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			// If the context has been cancelled, stop reading from the stream
+			ch, exists := h.ThreadSSEChannels[threadID]
+			if !exists {
+				ch = make(chan string, 100)
+				h.ThreadSSEChannels[threadID] = ch
+			}
+			ch <- ""
+			return
+		default:
+			// If the context has not been cancelled, read the next line from the stream
+			response, err := stream.Recv()
+			if err == io.EOF {
+				break loop
+			} else if err != nil {
+				break loop
+			}
 
-                responseContent := response.Choices[0].Delta.Content
-                responseBuilder.WriteString(responseContent)
+			responseContent := response.Choices[0].Delta.Content
+			responseBuilder.WriteString(responseContent)
 
-                ch, exists := h.ThreadSSEChannels[threadID]
-                if !exists {
-                    ch = make(chan string, 100)
-                    h.ThreadSSEChannels[threadID] = ch
-                }
+			ch, exists := h.ThreadSSEChannels[threadID]
+			if !exists {
+				ch = make(chan string, 100)
+				h.ThreadSSEChannels[threadID] = ch
+			}
 
-                select {
-                case ch <- responseContent:
-                    // Successfully sent to channel
-                default:
-                    log.Printf("Channel buffer full or closed. Dropping message for thread ID %s.", threadID)
-                }
-            }
-        }
+			select {
+			case ch <- responseContent:
+				// Successfully sent to channel
+			default:
+				log.Printf("Channel buffer full or closed. Dropping message for thread ID %s.", threadID)
+			}
+		}
+	}
 
-        // Start another goroutine to run createTransaction after the loop has finished
-        defer func() {
-            transactionID, err := h.createTransaction(userID, openaimodel.OpenAITransactionInput{
-                ThreadID: threadID.String(),
-                Message:  responseBuilder.String(),
-                Model:    model,
-                Role:     "assistant",
-            })
-            if err != nil {
-                log.Printf("Error saving assistant transaction: %v", err)
-            }
+	// Start another goroutine to run createTransaction after the loop has finished
+	defer func() {
+		transactionID, err := h.createTransaction(userID, openaimodel.OpenAITransactionInput{
+			ThreadID: threadID.String(),
+			Message:  responseBuilder.String(),
+			Model:    model,
+			Role:     "assistant",
+		})
+		if err != nil {
+			log.Printf("Error saving assistant transaction: %v", err)
+		}
 
-            transaction, err := h.openAIService.GetTransactionByID(transactionID)
-            if err != nil {
-                log.Printf("Failed to get transaction: %v", err)
-                return
-            }
-            log.Println("Tokens from Response: ", transaction.MessageLength)
-        }()
+		transaction, err := h.openAIService.GetTransactionByID(transactionID)
+		if err != nil {
+			log.Printf("Failed to get transaction: %v", err)
+			return
+		}
+		log.Println("Tokens from Response: ", transaction.MessageLength)
+	}()
 
-    // Send a response to the client immediately
-    c.JSON(http.StatusOK, gin.H{"message": "Message received and processing started. Please check back later for the result."})
+	// Send a response to the client immediately
+	c.JSON(http.StatusOK, gin.H{"message": "Message received and processing started. Please check back later for the result."})
 }
 
 func (h *OpenAIHandler) StopGeneration(threadID uuid.UUID) error {
