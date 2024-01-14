@@ -265,7 +265,7 @@ func (h *OpenAIHandler) FetchDrawing(c *gin.Context) {
 	}
 
 	type RequestData struct {
-		ImageFile string `json:"imageFile"`
+		ImageURL string `json:"imageURL"`
 	}
 
 	// Bind the input data (assumed to be the model name)
@@ -275,10 +275,13 @@ func (h *OpenAIHandler) FetchDrawing(c *gin.Context) {
 		return
 	}
 
+	if err != nil {
+		log.Println("Error from OpenAI: ", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
+		return
+	}
 	// Construct the prompt
-	systemPrompt := `You are an expert Tailwind developer. A user will provide you with a
- low-fidelity wireframe of an application and you will return a single html file that uses Tailwind to create the website. Use creative license to make the application more fleshed out. If you need to insert an image, use placehold.co 
- to create a placeholder image. Respond only with the html file.`
+	systemPrompt := `You are an expert Tailwind developer. A user will provide you with a low-fidelity wireframe of an application and you will return a single html file that uses Tailwind to create the website. Use creative license to make the application more fleshed out. If you need to insert an image, use placehold.co to create a placeholder image. Respond only with the html file.`
 
 	// Create the request payload and send the request to OpenAI
 	resp, err := openaiClient.CreateChatCompletion(
@@ -296,20 +299,20 @@ func (h *OpenAIHandler) FetchDrawing(c *gin.Context) {
 						{
 							Type: "image_url",
 							ImageURL: &openai.ChatMessageImageURL{
-								URL:    requestData.ImageFile,
-								Detail: openai.ImageURLDetailLow},
+								URL:    requestData.ImageURL,
+								Detail: openai.ImageURLDetailAuto,
+							},
 						},
 					},
 				},
 			},
-			MaxTokens: 500,
+			MaxTokens: 1000,
 		},
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
 		return
 	}
-
 	// Check if the response has content and return the content
 	if len(resp.Choices) > 0 && len(resp.Choices[0].Message.Content) > 0 {
 		c.JSON(http.StatusOK, resp.Choices[0].Message.Content)
@@ -368,7 +371,6 @@ func (h *OpenAIHandler) MessageHanlder(c *gin.Context) {
 	encoding := "cl100k_base"
 	tke, err := tiktoken.GetEncoding(encoding)
 	if err != nil {
-		err = fmt.Errorf("getEncoding: %v", err)
 		return
 	}
 	// encodd
