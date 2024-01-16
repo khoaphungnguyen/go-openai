@@ -123,11 +123,14 @@ func (h *UserHandler) Login(c *gin.Context) {
 
 	// Prepare and send the response.
 	response := gin.H{
-		"id":          user.ID,
-		"name":        user.FullName,
-		"expiresIn":   time.Now().Add(time.Second * time.Duration(jwtWrapper.AccessTokenExpiration.Seconds())).Unix(),
-		"accessToken": signedToken,
+		"id":           user.ID,
+		"name":         user.FullName,
+		"email":        user.Email,
+		"role":         user.Role,
+		"expiresIn":    time.Now().Add(time.Second * time.Duration(jwtWrapper.AccessTokenExpiration.Seconds())).Unix(),
+		"accessToken":  signedToken,
 		"refreshToken": signedRefreshToken,
+
 		//"lastLogin":   lastLoginStr,
 	}
 	c.JSON(http.StatusOK, response)
