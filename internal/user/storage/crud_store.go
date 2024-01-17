@@ -32,6 +32,16 @@ func (store *userStore) Delete(id uuid.UUID) error {
 	return store.db.Delete(&modeluser.User{}, id).Error
 }
 
+// GetAllUsers returns all users in the database.
+func (store *userStore) GetAllUsers() ([]modeluser.User, error) {
+	var users []modeluser.User
+	result := store.db.Find(&users)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrUserNotFound
+	}
+	return users, result.Error
+}
+
 // GetUserByUUID finds a user by UUID.
 func (store *userStore) GetUserByUUID(id uuid.UUID) (*modeluser.User, error) {
 	var user modeluser.User

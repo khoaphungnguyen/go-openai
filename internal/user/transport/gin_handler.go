@@ -142,7 +142,6 @@ type RefreshTokenInput struct {
 
 // RenewAccessToken handles the renewal of the access token using the refresh token.
 func (h *UserHandler) RenewAccessToken(c *gin.Context) {
-	log.Println("RenewAccessToken")
 	var input RefreshTokenInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -186,6 +185,51 @@ func (h *UserHandler) RenewAccessToken(c *gin.Context) {
 		"accessToken": newAccessToken,
 		"expiresIn":   time.Now().Add(time.Second * time.Duration(jwtWrapper.AccessTokenExpiration.Seconds())).Unix(),
 	})
+}
+
+// GetAllUsers handles retrieving all users.
+func (h *UserHandler) GetAllUsers(c *gin.Context) {
+
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	// Retrieve the current user data
+	user, err := h.userService.GetUserByUUID(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	if user.Role != modeluser.AdminRole {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not authorized to perform this action"})
+		return
+	}
+
+	users, err := h.userService.GetAllUsers()
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get all users"})
+		return
+	}
+	// I want to return only email, name, createdAt, lastLogin
+	var AllUsers []modeluser.AllUser
+
+	//get all users except admin
+for _, user := range users {
+    if user.Role != modeluser.AdminRole {
+        AllUsers = append(AllUsers, modeluser.AllUser{
+            FullName:      user.FullName,
+            Email:         user.Email,
+            EmailVerified: user.EmailVerified,
+            CreatedAt:     user.CreatedAt,
+            LastLogin:     user.LastLogin,
+        })
+    }
+}
+c.JSON(http.StatusOK, AllUsers)
 }
 
 // UpdateProfile handles updating user information.

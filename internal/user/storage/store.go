@@ -12,6 +12,7 @@ import (
 type UserStore interface {
 	Create(user *modeluser.User) error
 	GetUserByEmail(email string) (*modeluser.User, error)
+	GetAllUsers() ([]modeluser.User, error)
 	Update(user *modeluser.User) error
 	Delete(id uuid.UUID) error
 	GetUserByUUID(id uuid.UUID) (*modeluser.User, error)

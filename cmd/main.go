@@ -84,6 +84,7 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 
 	protected := router.Group("/protected").Use(middleware.AuthMiddleware(jwtKey))
 	{
+		protected.GET("/users", userHandler.GetAllUsers)
 		protected.GET("/profile", userHandler.Profile)
 		protected.PUT("/profile", userHandler.UpdateProfile)
 		protected.PUT("/profile/restore", userHandler.RestoreProfile)
@@ -111,4 +112,3 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 		protected.POST("/chat/ask/:threadID", openAIHandler.MessageHanlder)
 	}
 }
-

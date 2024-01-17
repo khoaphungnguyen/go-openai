@@ -56,3 +56,22 @@ func (u *User) ToPublicUser() PublicUser {
 		UpdatedAt:     u.UpdatedAt,
 	}
 }
+
+type AllUser struct {
+	FullName      string     `json:"fullName"`
+	Email         string     `json:"email"`
+	EmailVerified bool       `json:"emailVerified"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	LastLogin     *time.Time `json:"lastLogin"`
+}
+
+// ToPublicUser converts a User to its public representation.
+func (u *User) ToAllUser() AllUser {
+	return AllUser{
+		FullName:      u.FullName,
+		Email:         u.Email,
+		EmailVerified: u.EmailVerified,
+		CreatedAt:     u.CreatedAt,
+		LastLogin:     u.LastLogin,
+	}
+}

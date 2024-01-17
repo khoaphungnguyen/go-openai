@@ -27,6 +27,10 @@ func (s *UserService) CreateUser(fullName, email, password string, role modeluse
 	return s.userStore.Create(user)
 }
 
+func (s *UserService) GetAllUsers() ([]modeluser.User, error) {
+	return s.userStore.GetAllUsers()
+}
+
 // UpdateUser updates an existing user's information.
 func (s *UserService) UpdateUser(userID uuid.UUID, fullName, email string) error {
 	user, err := s.userStore.GetUserByUUID(userID)
