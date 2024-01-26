@@ -2,7 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Users Table
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   full_name VARCHAR(100) NOT NULL,
   email VARCHAR(50) UNIQUE NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE users (
 );
 
 -- Chat Thread Table
-CREATE TABLE chat_thread (
+CREATE TABLE IF NOT EXISTS chat_thread (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   title VARCHAR(255),
@@ -27,7 +27,7 @@ CREATE TABLE chat_thread (
 );
 
 -- Chat Message Table
-CREATE TABLE chat_message (
+CREATE TABLE IF NOT EXISTS chat_message (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   thread_id UUID REFERENCES chat_thread(id) ON DELETE CASCADE,
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -37,7 +37,7 @@ CREATE TABLE chat_message (
 );
 
 -- OpenAI Transacton Table
-CREATE TABLE openai_transaction (
+CREATE TABLE IF NOT EXISTS openai_transaction (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   thread_id UUID REFERENCES chat_thread(id) ON DELETE CASCADE,
@@ -46,6 +46,32 @@ CREATE TABLE openai_transaction (
   role VARCHAR(50) NOT NULL CHECK (role IN ('user', 'assistant')),
   message_length INT,  -- Tracks the length of the user's message
   process_time TIMESTAMPTZ DEFAULT NOW()
+);
+
+
+-- OpenAI Transacton Table
+CREATE TABLE IF NOT EXISTS openai_transaction (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  thread_id UUID REFERENCES chat_thread(id) ON DELETE CASCADE,
+  message_id UUID REFERENCES chat_message(id) ON DELETE SET NULL,
+  model VARCHAR(255),
+  role VARCHAR(50) NOT NULL CHECK (role IN ('user', 'assistant')),
+  message_length INT,  -- Tracks the length of the user's message
+  process_time TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Note Table
+CREATE TABLE IF NOT EXISTS notes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  title VARCHAR(255),
+  problem TEXT,
+  approach TEXT,
+  solution TEXT,
+  extra_notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Create or replace the trigger function to update the chat_thread

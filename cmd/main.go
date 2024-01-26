@@ -15,6 +15,9 @@ import (
 	messagestorage "github.com/khoaphungnguyen/go-openai/internal/message/storage"
 	messagetransport "github.com/khoaphungnguyen/go-openai/internal/message/transport"
 	middleware "github.com/khoaphungnguyen/go-openai/internal/middlewares"
+	notebusiness "github.com/khoaphungnguyen/go-openai/internal/note/business"
+	notestorage "github.com/khoaphungnguyen/go-openai/internal/note/storage"
+	notetransport "github.com/khoaphungnguyen/go-openai/internal/note/transport"
 	openaibusiness "github.com/khoaphungnguyen/go-openai/internal/openai/business"
 	openaistorage "github.com/khoaphungnguyen/go-openai/internal/openai/storage"
 	openaitransport "github.com/khoaphungnguyen/go-openai/internal/openai/transport"
@@ -59,12 +62,15 @@ func main() {
 	messageService := messagebusiness.NewMessageService(messagestorage.NewMessageStore(db))
 	messageHandler := messagetransport.NewMessageHandler(messageService)
 
+	noteService := notebusiness.NewNoteService(notestorage.NewNoteStore(db))
+	noteHandler := notetransport.NewNoteHandler(noteService)
+
 	openaiService := openaibusiness.NewOpenAIService(openaistorage.NewOpenAIStore(db), messageService)
 	chatHandler := openaitransport.NewOpenAIHandler(openaiService)
 
 	router := gin.Default()
 	router.Use(middleware.CORSMiddleware([]string{"http://localhost:3000"}))
-	setupRoutes(router, userHandler, messageHandler, chatHandler, jwtKey, openaiClient)
+	setupRoutes(router, userHandler, messageHandler, noteHandler, chatHandler, jwtKey, openaiClient)
 
 	if err := router.Run(":8000"); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
@@ -72,7 +78,7 @@ func main() {
 }
 
 // setupRoutes defines the HTTP routes for the application.
-func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, messageHandler *messagetransport.MessageHandler,
+func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, messageHandler *messagetransport.MessageHandler, noteHandler *notetransport.NoteHandler,
 	openAIHandler *openaitransport.OpenAIHandler, jwtKey string, openaiClient *openai.Client) {
 
 	auth := router.Group("/auth")
@@ -97,6 +103,13 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 		protected.DELETE("/thread/:id", messageHandler.DeleteThread)
 		protected.POST("/message", messageHandler.CreateMessage)
 		protected.GET("/threads/:threadID", messageHandler.GetMessagesByThreadID)
+
+		// Note routes under protected group
+		protected.POST("/notes", noteHandler.CreateNote)
+		protected.GET("/notes", noteHandler.GetAllNoteByUserID)
+		protected.GET("/notes/:noteID", noteHandler.GetNoteByID)
+		protected.PUT("/notes/:noteID", noteHandler.UpdateNote)
+		protected.DELETE("/notes/:noteID", noteHandler.DeleteNote)
 
 		// Apply OpenAIClientMiddleware to the protected group that requires OpenAI client
 		protected.Use(middleware.OpenAIClientMiddleware(openaiClient))
