@@ -107,9 +107,9 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 		// Note routes under protected group
 		protected.POST("/notes", noteHandler.CreateNote)
 		protected.GET("/notes", noteHandler.GetAllNoteByUserID)
-		protected.GET("/notes/:noteID", noteHandler.GetNoteByID)
-		protected.PUT("/notes/:noteID", noteHandler.UpdateNote)
-		protected.DELETE("/notes/:noteID", noteHandler.DeleteNote)
+		protected.GET("/notes/:id", noteHandler.GetNoteByID)
+		protected.PUT("/notes/:id", noteHandler.UpdateNote)
+		protected.DELETE("/notes/:id", noteHandler.DeleteNote)
 
 		// Apply OpenAIClientMiddleware to the protected group that requires OpenAI client
 		protected.Use(middleware.OpenAIClientMiddleware(openaiClient))

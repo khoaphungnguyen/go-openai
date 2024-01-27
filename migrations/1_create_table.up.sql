@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS notes (
   problem TEXT,
   approach TEXT,
   solution TEXT,
-  extra_notes TEXT,
+  extra_note TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

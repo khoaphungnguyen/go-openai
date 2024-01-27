@@ -2,7 +2,6 @@ package notetransport
 
 import (
 	"errors"
-	"log"
 	"net/http"
 	"time"
 
@@ -25,7 +24,15 @@ type NoteResponse struct {
 	ID        uuid.UUID `json:"id"`
 	Title     string    `json:"title"`
 	Problem   string    `json:"problem"`
+	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type NoteDetail struct {
+	Problem   string `json:"problem"`
+	Approach  string `json:"approach"`
+	Solution  string `json:"solution"`
+	ExtraNote string `json:"extra_note"`
 }
 
 type NoteDetailResponse struct {
@@ -40,7 +47,6 @@ type NoteDetailResponse struct {
 
 // CreateNote handles the creation of a new note.
 func (nh *NoteHandler) CreateNote(c *gin.Context) {
-	log.Println("CreateNote1")
 	var payload NoteCreateRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		respondWithError(c, http.StatusBadRequest, "Invalid request payload")
@@ -52,23 +58,17 @@ func (nh *NoteHandler) CreateNote(c *gin.Context) {
 		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	log.Println("CreateNote2")
 	note := &notemodel.Note{
 		Title:  payload.Title,
 		UserID: userID,
 	}
-
-	log.Println("CreateNote3")
 	if err := nh.noteService.CreateNote(note); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to create note")
 		return
 	}
 
-	respondWithJSON(c, http.StatusCreated, NoteCreateResponse{
-		ID:        note.ID,
-		Title:     note.Title,
-		CreatedAt: note.CreatedAt,
-	})
+	respondWithJSON(c, http.StatusCreated, note)
+
 }
 
 // GetAllNoteByUserID handles the retrieval of all notes for a specific user.
@@ -91,6 +91,7 @@ func (nh *NoteHandler) GetAllNoteByUserID(c *gin.Context) {
 			ID:        note.ID,
 			Title:     note.Title,
 			Problem:   note.Problem,
+			CreatedAt: note.CreatedAt,
 			UpdatedAt: note.UpdatedAt,
 		})
 	}
@@ -163,14 +164,13 @@ func (nh *NoteHandler) UpdateNote(c *gin.Context) {
 		return
 	}
 
-	var payload NoteDetailResponse
+	var payload NoteDetail
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		respondWithError(c, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
 
 	note := &notemodel.Note{
-		Title:     payload.Title,
 		Problem:   payload.Problem,
 		Approach:  payload.Approach,
 		Solution:  payload.Solution,
