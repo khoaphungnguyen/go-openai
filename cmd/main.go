@@ -114,6 +114,7 @@ func setupRoutes(router *gin.Engine, userHandler *usertransport.UserHandler, mes
 		// Apply OpenAIClientMiddleware to the protected group that requires OpenAI client
 		protected.Use(middleware.OpenAIClientMiddleware(openaiClient))
 		protected.POST("/suggestions", openAIHandler.FetchSuggestion)
+		protected.POST("/hints", openAIHandler.GenerateHint)
 		protected.POST("/drawings", openAIHandler.FetchDrawing)
 		protected.POST("/transactions", openAIHandler.CreateTransaction)
 		protected.GET("/transactions/user/:userID", openAIHandler.GetTransactionsByUserID)

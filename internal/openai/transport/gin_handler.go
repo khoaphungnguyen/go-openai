@@ -31,10 +31,15 @@ type LocalChat struct {
 	Format   string         `json:"format"`
 }
 
+type LocalOptions struct {
+	NumPredict int `json:"num_predict"`
+}
 type LocalRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
+	Model   string       `json:"model"`
+	Prompt  string       `json:"prompt"`
+	System  string       `json:"system"`
+	Stream  bool         `json:"stream"`
+	Options LocalOptions `json:"options"`
 }
 
 type Response struct {
@@ -226,6 +231,102 @@ func (h *OpenAIHandler) FetchSuggestion(c *gin.Context) {
 			openai.ChatCompletionRequest{
 				Model:            requestData.Model,
 				Messages:         []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
+				Temperature:      1,
+				TopP:             1,
+				FrequencyPenalty: 0,
+				MaxTokens:        200,
+				N:                1,
+				Stream:           false,
+			},
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch suggestions"})
+			return
+		}
+
+		// Check if the response has content and return the content
+		if len(resp.Choices) > 0 && len(resp.Choices[0].Message.Content) > 0 {
+			c.JSON(http.StatusOK, resp.Choices[0].Message.Content)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "No content in response"})
+	}
+}
+
+// FetchSuggestion handles the request to fetch suggestions from OpenAI.
+func (h *OpenAIHandler) GenerateHint(c *gin.Context) {
+	// Extract user ID from context, if required
+	_, err := common.GetUserIDFromContext(c)
+	if err != nil {
+		common.RespondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Retrieve the OpenAI client from the context
+	openaiClient, exists := c.MustGet("openaiClient").(*openai.Client)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "OpenAI client not available"})
+		return
+	}
+	type RequestData struct {
+		Model string `json:"model"`
+		Input string `json:"input"`
+	}
+
+	// Bind the input data (assumed to be the model name)
+	var requestData RequestData
+	if err := c.ShouldBindJSON(&requestData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
+		return
+	}
+	if !strings.HasPrefix(requestData.Model, "gpt") {
+		// Construct the prompt
+		systemPrompt := "Guide the user through the algorithmic challenge, providing feedback on their approach. Don't provide solutions, but help the user find the solution themselves."
+		req := LocalRequest{
+			Model:  requestData.Model,
+			Prompt: requestData.Input,
+			System: systemPrompt,
+			Stream: false,
+			Options: LocalOptions{
+				NumPredict: 200,
+			},
+		}
+		reqJson, _ := json.Marshal(req)
+		resp, err := http.Post("http://localhost:11434/api/generate", "application/json", bytes.NewBuffer(reqJson))
+		if err != nil {
+			// handle error
+			log.Println(err)
+		}
+		defer resp.Body.Close()
+		// Create the request payload and send the request
+		message, err := io.ReadAll(resp.Body)
+		if err != nil {
+			// handle error
+			log.Println(err)
+		}
+
+		var respData LocalResponse
+		err = json.Unmarshal(message, &respData)
+		if err != nil {
+			// handle error
+			log.Println(err)
+		}
+		// Check if the response has content and return the content
+		if len(respData.Response) > 0 {
+			c.JSON(http.StatusOK, respData.Response)
+			return
+		}
+	} else {
+		// Construct the prompt
+		prompt := "Guide the user through the algorithmic challenge, providing feedback on their approach. Don't provide direct solutions, but help the user find the solution themselves."
+		// Create the request payload and send the request to OpenAI
+		resp, err := openaiClient.CreateChatCompletion(
+			context.Background(),
+			openai.ChatCompletionRequest{
+				Model: requestData.Model,
+				Messages: []openai.ChatCompletionMessage{{
+					Role: "system", Content: prompt,
+				}, {Role: "user", Content: requestData.Input}},
 				Temperature:      1,
 				TopP:             1,
 				FrequencyPenalty: 0,
