@@ -269,8 +269,9 @@ func (h *OpenAIHandler) GenerateHint(c *gin.Context) {
 		return
 	}
 	type RequestData struct {
-		Model string `json:"model"`
-		Input string `json:"input"`
+		Model  string `json:"model"`
+		Input  string `json:"input"`
+		System string `json:"system"`
 	}
 
 	// Bind the input data (assumed to be the model name)
@@ -281,11 +282,10 @@ func (h *OpenAIHandler) GenerateHint(c *gin.Context) {
 	}
 	if !strings.HasPrefix(requestData.Model, "gpt") {
 		// Construct the prompt
-		systemPrompt := "Guide the user through the algorithmic challenge, providing feedback on their approach. Don't provide solutions, but help the user find the solution themselves."
 		req := LocalRequest{
 			Model:  requestData.Model,
 			Prompt: requestData.Input,
-			System: systemPrompt,
+			System: requestData.System,
 			Stream: false,
 			Options: LocalOptions{
 				NumPredict: 200,
@@ -317,15 +317,13 @@ func (h *OpenAIHandler) GenerateHint(c *gin.Context) {
 			return
 		}
 	} else {
-		// Construct the prompt
-		prompt := "Guide the user through the algorithmic challenge, providing feedback on their approach. Don't provide direct solutions, but help the user find the solution themselves."
 		// Create the request payload and send the request to OpenAI
 		resp, err := openaiClient.CreateChatCompletion(
 			context.Background(),
 			openai.ChatCompletionRequest{
 				Model: requestData.Model,
 				Messages: []openai.ChatCompletionMessage{{
-					Role: "system", Content: prompt,
+					Role: "system", Content: requestData.System,
 				}, {Role: "user", Content: requestData.Input}},
 				Temperature:      1,
 				TopP:             1,
