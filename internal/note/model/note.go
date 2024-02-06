@@ -15,7 +15,9 @@ type Note struct {
 	Problem   string    `gorm:"type:text;not null"`
 	Approach  string    `gorm:"type:text;not null"`
 	Solution  string    `gorm:"type:text;not null"`
-	ExtraNote string    `gorm:"type:text"`
+	Code      string    `gorm:"type:text"`
+	Level     string    `gorm:"type:varchar(255);not null"`
+	Type      string    `gorm:"type:varchar(255);not null"`
 	CreatedAt time.Time `gorm:"default:now()"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }

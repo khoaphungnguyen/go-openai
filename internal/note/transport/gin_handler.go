@@ -12,6 +12,8 @@ import (
 
 type NoteCreateRequest struct {
 	Title string `json:"title"`
+	Level string `json:"level"`
+	Type  string `json:"type"`
 }
 
 type NoteCreateResponse struct {
@@ -24,15 +26,19 @@ type NoteResponse struct {
 	ID        uuid.UUID `json:"id"`
 	Title     string    `json:"title"`
 	Problem   string    `json:"problem"`
+	Type      string    `json:"type"`
+	Level     string    `json:"level"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type NoteDetail struct {
-	Problem   string `json:"problem"`
-	Approach  string `json:"approach"`
-	Solution  string `json:"solution"`
-	ExtraNote string `json:"extra_note"`
+	Problem  string `json:"problem"`
+	Approach string `json:"approach"`
+	Solution string `json:"solution"`
+	Code     string `json:"code"`
+	Type     string `json:"type"`
+	Level    string `json:"level"`
 }
 
 type NoteDetailResponse struct {
@@ -40,7 +46,9 @@ type NoteDetailResponse struct {
 	Problem   string    `json:"problem"`
 	Approach  string    `json:"approach"`
 	Solution  string    `json:"solution"`
-	ExtraNote string    `json:"extra_note"`
+	Code      string    `json:"code"`
+	Type      string    `json:"type"`
+	Level     string    `json:"level"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -60,6 +68,8 @@ func (nh *NoteHandler) CreateNote(c *gin.Context) {
 	}
 	note := &notemodel.Note{
 		Title:  payload.Title,
+		Level:  payload.Level,
+		Type:   payload.Type,
 		UserID: userID,
 	}
 	if err := nh.noteService.CreateNote(note); err != nil {
@@ -91,6 +101,8 @@ func (nh *NoteHandler) GetAllNoteByUserID(c *gin.Context) {
 			ID:        note.ID,
 			Title:     note.Title,
 			Problem:   note.Problem,
+			Type:      note.Type,
+			Level:     note.Level,
 			CreatedAt: note.CreatedAt,
 			UpdatedAt: note.UpdatedAt,
 		})
@@ -171,10 +183,12 @@ func (nh *NoteHandler) UpdateNote(c *gin.Context) {
 	}
 
 	note := &notemodel.Note{
-		Problem:   payload.Problem,
-		Approach:  payload.Approach,
-		Solution:  payload.Solution,
-		ExtraNote: payload.ExtraNote,
+		Problem:  payload.Problem,
+		Approach: payload.Approach,
+		Solution: payload.Solution,
+		Code:     payload.Code,
+		Type:     payload.Type,
+		Level:    payload.Level,
 	}
 
 	if err := nh.noteService.UpdateNoteByID(userID, noteID, note); err != nil {
@@ -215,7 +229,9 @@ func convertToNoteResponse(note *notemodel.Note) NoteDetailResponse {
 		Problem:   note.Problem,
 		Approach:  note.Approach,
 		Solution:  note.Solution,
-		ExtraNote: note.ExtraNote,
+		Code:      note.Code,
+		Type:      note.Type,
+		Level:     note.Level,
 		CreatedAt: note.CreatedAt,
 		UpdatedAt: note.UpdatedAt,
 	}

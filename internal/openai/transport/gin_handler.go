@@ -328,7 +328,7 @@ func (h *OpenAIHandler) GenerateHint(c *gin.Context) {
 				Temperature:      1,
 				TopP:             1,
 				FrequencyPenalty: 0,
-				MaxTokens:        200,
+				MaxTokens:        500,
 				N:                1,
 				Stream:           false,
 			},

@@ -69,7 +69,9 @@ CREATE TABLE IF NOT EXISTS notes (
   problem TEXT,
   approach TEXT,
   solution TEXT,
-  extra_note TEXT,
+  code TEXT,
+  level VARCHAR(50) NOT NULL CHECK (level IN ('Easy', 'Medium', 'Hard')),
+  type TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
