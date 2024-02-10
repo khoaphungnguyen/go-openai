@@ -48,23 +48,12 @@ CREATE TABLE IF NOT EXISTS openai_transaction (
   process_time TIMESTAMPTZ DEFAULT NOW()
 );
 
-
--- OpenAI Transacton Table
-CREATE TABLE IF NOT EXISTS openai_transaction (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  thread_id UUID REFERENCES chat_thread(id) ON DELETE CASCADE,
-  message_id UUID REFERENCES chat_message(id) ON DELETE SET NULL,
-  model VARCHAR(255),
-  role VARCHAR(50) NOT NULL CHECK (role IN ('user', 'assistant')),
-  message_length INT,  -- Tracks the length of the user's message
-  process_time TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- Note Table
 CREATE TABLE IF NOT EXISTS notes (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  thread_id UUID REFERENCES chat_thread(id) ON DELETE CASCADE,
+  message_id UUID REFERENCES chat_message(id) ON DELETE SET NULL,
   title VARCHAR(255),
   problem TEXT,
   approach TEXT,

@@ -11,6 +11,7 @@ import (
 type Note struct {
 	ID        uuid.UUID `gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
 	UserID    uuid.UUID `gorm:"type:uuid"`
+	ThreadID  uuid.UUID `gorm:"type:uuid"`
 	Title     string    `gorm:"type:varchar(255);not null"`
 	Problem   string    `gorm:"type:text;not null"`
 	Approach  string    `gorm:"type:text;not null"`

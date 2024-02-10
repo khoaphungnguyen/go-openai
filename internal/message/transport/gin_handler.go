@@ -13,6 +13,7 @@ import (
 )
 
 type ThreadPayload struct {
+	Title string `json:"title"`
 	Model string `json:"model"`
 }
 
@@ -47,7 +48,7 @@ func (mh *MessageHandler) CreateThread(c *gin.Context) {
 	}
 
 	thread := &messagemodel.ChatThread{
-		Title:  "New thread",
+		Title:  payload.Title,
 		Model:  payload.Model,
 		UserID: userID,
 	}

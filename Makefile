@@ -3,17 +3,17 @@ export
 
 # Start all services (PostgreSQL, migrations, and Go application)
 all:
-	docker-compose up -d --build
+	docker compose up -d --build
 
 # Start PostgreSQL and run migrations as a one-off task
 setup:
-	docker-compose up -d postgres
+	docker compose up -d postgres
 	sleep 3 # Give time for the database to be ready
-	docker-compose run --rm migrate
+	docker compose run --rm migrate
 
 # Stop and remove all services, networks, and volumes
 teardown:
-	docker-compose down -v
+	docker compose down -v
 
 # Remove data with confirmation
 removedata:
@@ -28,15 +28,15 @@ cleanup:
 
 # Run migrations up
 migration_up:
-	docker-compose run --rm migrate -path=/migrations -database "${DATABASE_URL}" up
+	docker compose run --rm migrate -path=/migrations -database "${DATABASE_URL}" up
 
 # Run migrations down (reversing migrations)
 migration_down:
-	docker-compose run --rm migrate -path=/migrations -database "${DATABASE_URL}" down
+	docker compose run --rm migrate -path=/migrations -database "${DATABASE_URL}" down
 
 # Fix a specific version in migrations
 migration_fix:
-	docker-compose run --rm migrate -path=/migrations -database "${DATABASE_URL}" force 1
+	docker compose run --rm migrate -path=/migrations -database "${DATABASE_URL}" force 1
 
 # Run tests
 test:

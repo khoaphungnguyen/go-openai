@@ -11,19 +11,22 @@ import (
 )
 
 type NoteCreateRequest struct {
-	Title string `json:"title"`
-	Level string `json:"level"`
-	Type  string `json:"type"`
+	Title    string `json:"title"`
+	Level    string `json:"level"`
+	ThreadID string `json:"threadID"`
+	Type     string `json:"type"`
 }
 
 type NoteCreateResponse struct {
 	ID        uuid.UUID `json:"id"`
 	Title     string    `json:"title"`
+	ThreadID  uuid.UUID `json:"threadID"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 type NoteResponse struct {
 	ID        uuid.UUID `json:"id"`
+	ThreadID  uuid.UUID `json:"threadID"`
 	Title     string    `json:"title"`
 	Problem   string    `json:"problem"`
 	Type      string    `json:"type"`
@@ -33,15 +36,17 @@ type NoteResponse struct {
 }
 
 type NoteDetail struct {
-	Problem  string `json:"problem"`
-	Approach string `json:"approach"`
-	Solution string `json:"solution"`
-	Code     string `json:"code"`
-	Type     string `json:"type"`
-	Level    string `json:"level"`
+	ThreadID uuid.UUID `json:"threadID"`
+	Problem  string    `json:"problem"`
+	Approach string    `json:"approach"`
+	Solution string    `json:"solution"`
+	Code     string    `json:"code"`
+	Type     string    `json:"type"`
+	Level    string    `json:"level"`
 }
 
 type NoteDetailResponse struct {
+	ThreadID  uuid.UUID `json:"threadID"`
 	Title     string    `json:"title"`
 	Problem   string    `json:"problem"`
 	Approach  string    `json:"approach"`
@@ -60,17 +65,23 @@ func (nh *NoteHandler) CreateNote(c *gin.Context) {
 		respondWithError(c, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
-
 	userID, err := getUserIDFromContext(c)
 	if err != nil {
 		respondWithError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	//convert string to uuid
+	threadID, err := uuid.Parse(payload.ThreadID)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid message ID")
+		return
+	}
 	note := &notemodel.Note{
-		Title:  payload.Title,
-		Level:  payload.Level,
-		Type:   payload.Type,
-		UserID: userID,
+		Title:    payload.Title,
+		Level:    payload.Level,
+		Type:     payload.Type,
+		ThreadID: threadID,
+		UserID:   userID,
 	}
 	if err := nh.noteService.CreateNote(note); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to create note")
@@ -99,6 +110,7 @@ func (nh *NoteHandler) GetAllNoteByUserID(c *gin.Context) {
 	for _, note := range notes {
 		noteResponses = append(noteResponses, NoteResponse{
 			ID:        note.ID,
+			ThreadID:  note.ThreadID,
 			Title:     note.Title,
 			Problem:   note.Problem,
 			Type:      note.Type,
@@ -229,6 +241,7 @@ func convertToNoteResponse(note *notemodel.Note) NoteDetailResponse {
 		Problem:   note.Problem,
 		Approach:  note.Approach,
 		Solution:  note.Solution,
+		ThreadID:  note.ThreadID,
 		Code:      note.Code,
 		Type:      note.Type,
 		Level:     note.Level,
